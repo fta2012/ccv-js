@@ -1,0 +1,3 @@
+[submodule "external/ccv"]
+	path = external/ccv
+	url = https://github.com/liuliu/ccv.git
