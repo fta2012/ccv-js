@@ -2,125 +2,84 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <title>Track Learn Detect</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>CCV.js</title>
     <script type="text/javascript" src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/stats.js/r16/Stats.min.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
-    <script type="text/javascript" src="build/ccv.js"></script>
-    <script type="text/javascript">
-      $(() => {
-        let renderRect = ({ x, y, width, height }) => {
-          return $('<div class="rect">').css({
-            position: 'absolute',
-            left: x,
-            top: y,
-            width,
-            height,
-            border: '1px solid black',
-            backgroundColor: 'rgba(0, 255, 0, 0.5)',
-            pointerEvents: 'none'
-          });
-        }
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/4.2.0/normalize.min.css">
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+    <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css" rel="stylesheet" integrity="sha384-T8Gy5hrqNKT+hzMclPo118YTQO6cYprQmhrYwIiQ/3axmI1hQomh7Ud2hPOy8SP1" crossorigin="anonymous">
 
-        let stats = new Stats();
-        stats.showPanel(0);
-        $(stats.domElement).appendTo('body').css({ position: 'absolute', left: 0, bottom: 0 });
-
-        let canvasContainer = $('#canvas-container');
-
-        var clickBox;
-        let canvas = $('#canvas')
-          .on('click touchstart', (e) => {
-            let rect = canvas.getBoundingClientRect();
-            let x = canvas.width * (e.clientX - rect.left) / (rect.right - rect.left);
-            let y = canvas.height * (e.clientY - rect.top) / (rect.bottom - rect.top);
-            clickBox = {
-              x: x - 10,
-              y: y - 10,
-              width: 20,
-              height: 20
-            };
-            console.log('clicked', clickBox);
-            $('.rect').remove();
-            canvasContainer.append(renderRect(clickBox));
-          })[0];
-
-
-        let video = document.createElement('video');
-        navigator.mediaDevices.getUserMedia({
-          video:  {
-            mandatory: {
-              maxWidth: 160,
-              maxHeight: 120
-            }
-          }
-        }).then((stream) => {
-          video.src = window.URL.createObjectURL(stream);
-          video.onloadedmetadata = loop;
-          video.play();
-        }).catch((e) => {
-          alert(e.toString() + '\n' + 'This demo requires a webcam');
-        });
-
-        let tracker = new Module.TLDTracker();
-
-        let loop = () => {
-          requestAnimationFrame(loop);
-          if (video.readyState > 2) {
-            stats.begin();
-
-
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            let context = canvas.getContext('2d');
-            context.drawImage(video, 0, 0);
-            let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-
-            if (clickBox) {
-              $('.patch').remove();
-              tracker.init(imageData, clickBox, Module.ccv_tld_default_params);
-              clickBox = null;
-            } else {
-              tracker.track(imageData, (info, found, top) => {
-                $('.rect').remove();
-                canvasContainer
-                  .append(top.map((comp) => {
-                    return renderRect(comp.rect).css('opacity', comp.classification.confidence / 100);
-                  }));
-                if (info.track_success) {
-                  canvasContainer
-                    .append(renderRect(found.rect).css({
-                      borderColor: 'red'
-                    }));
-                }
-                if (info.perform_learn) {
-                  imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                  let patch = $('<canvas class="patch">').prependTo('#tld-patches')[0];
-                  patch.width = found.rect.width;
-                  patch.height = found.rect.height;
-                  patch.getContext('2d').putImageData(imageData, -found.rect.x, -found.rect.y, found.rect.x, found.rect.y, found.rect.width, found.rect.height);
-                }
-              });
-            }
-            stats.end();
-          } else {
-            console.log('Video not ready');
-          }
-        };
-      });
-    </script>
+    <!--<script type="text/javascript" src="build/ccv.js"></script>-->
+    <script type="text/javascript" src="build/ccv_with_filesystem.js"></script>
   </head>
   <body>
-    <ul>
-      <li>Need webcam permissions.</li>
-      <li>Only works on latest chrome.</li>
-      <li>Click to start tracking (needs a few frames to warm up).</li>
-      <li>Click again to track something else.</li>
-    </ul>
+    <div class="container" style="padding-bottom:200px">
+      <div class="page-header">
+        <h1><a href="https://github.com/fta2012/ccv-js/">ccv.js</a> <small>Javascript port of <a href="http://libccv.org/doc/">ccv</a></small></h1>
+      </div>
+      <p class="lead">See <a href="http://libccv.org/doc/">original documentation</a> from libccv for details.</p>
+      <h1 class="page-header">TLD: Track Learn Detect</h1>
+      <p>A tracker that learns (also known as <a href="https://www.youtube.com/watch?v=1GhNXHCQGsM" target="_blank">Predator</a>).</p>
+      <p><button id="tld-demo-btn" class="btn btn-primary">Demo</button></p>
+      <div class="text-center">
+        <div id="tld" style="display:block;position:relative">
+        </div>
+      </div>
 
-    <div id="canvas-container" style="position:relative">
-      <canvas id="canvas"></canvas>
+      <h1 class="page-header">SWT: Stroke Width Transform</h1>
+      <p>Text detector.</p>
+      <button id="swt-demo-btn" class="btn btn-primary">Demo</button>
+      <div class="text-center">
+        <div id="swt" style="display:inline-block;position:relative">
+          <img id='swt' src="examples/text.jpg"></img>
+        </div>
+      </div>
+
+      <h1 class="page-header">SIFT: Scale Invariant Feature Transform</h1>
+      <p>Feature detector with brute-force matching.</p>
+      <button id="sift-demo-btn" class="btn btn-primary">Demo</button>
+      <div class="text-center">
+        <div id="sift" style="display:inline-block;position:relative;white-space:nowrap">
+          <img id="sift1" style="vertical-align:top" src="examples/book.png"></img><img id="sift2" src="examples/scene.png"></img>
+        </div>
+      </div>
+
+      <h1 class="page-header">SCD: SURF-Cascade Detection</h1>
+      <p>Face detector.</p>
+      <button id="scd-demo-btn" class="btn btn-primary">Demo</button>
+      <div class="text-center">
+        <div id="scd" style="display:inline-block;position:relative">
+          <img src="examples/faces.jpg"></img>
+        </div>
+      </div>
+  
+      <h1 class="page-header">Classic - Lucas-Kanade</h1>
+      <p>Optical flow.</p>
+      <button id="lucas-kanade-demo-btn" class="btn btn-primary">Demo</button>
+      <div class="text-center">
+        <div id="lucas-kanade" style="position:relative">
+					<div class="message"></div>
+					<div class="canvas-wrapper" style="position:relative;display:inline-block">
+						<canvas></canvas>
+					</div>
+        </div>
+      </div>
+
+
+      <h1 class="page-header">Classic - Canny</h1>
+      <p>Edge detector.</p>
+      <button id="canny-demo-btn" class="btn btn-primary">Demo</button>
+      <div class="text-center">
+        <div id="canny" style="display:inline-block;position:relative">
+          <img src="examples/canny.png"></img>
+        </div>
+      </div>
     </div>
-    <div id="tld-patches" style="max-height: 200px; overflow-y: auto;"></div>
+
+    <script type="text/javascript" src="examples/index.js"></script>
   </body>
 </html>
