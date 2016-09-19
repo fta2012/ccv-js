@@ -11,11 +11,47 @@ extern "C" {
 
 using namespace emscripten;
 
-// Reverse of _ccv_read_rgba_raw
-// TODO: rewrite more generically and move in ccv/lib/io/_ccv_io_raw.c
+int main() {
+  ccv_enable_default_cache();
+
+  EM_ASM({
+    //console.log('ready', Module);
+  });
+}
+
+const ccv_mser_param_t ccv_mser_default_params = { // From ccv/bin/msermatch.c
+  .min_area = 60,
+  .max_area = 10000, // Changed
+  .min_diversity = 0.2,
+  .area_threshold = 1.01,
+  .min_margin = 0.003,
+  .max_evolution = 200,
+  .edge_blur_sigma = sqrt(3.0),
+  .delta = 5,
+  .max_variance = 0.25,
+  .direction = CCV_DARK_TO_BRIGHT,
+};
+
+typedef struct { // See ccv_tld_param_t
+  ccv_size_t win_size;
+  int level;
+  float min_eigen;
+} ccv_lucas_kanade_param_t;
+
+const ccv_lucas_kanade_param_t ccv_lucas_kanade_default_params = {
+  .win_size = {
+    .width = ccv_tld_default_params.win_size.width,
+    .height = ccv_tld_default_params.win_size.height
+  },
+  .level = ccv_tld_default_params.level,
+  .min_eigen = 0.001,//ccv_tld_default_params.min_eigen,
+};
+
+
+
+
+// Reverse of _ccv_read_rgba_raw from ccv/lib/io/_ccv_io_raw.c
 void _ccv_write_rgba_raw(ccv_dense_matrix_t* x, unsigned char* data) {
-  int rows = x->rows;
-  int cols = x->cols;
   int c = CCV_GET_CHANNEL(x->type);
   assert(CCV_GET_DATA_TYPE(x->type) == CCV_8U);
   assert(c == CCV_C3 || c == CCV_C1);
@@ -41,7 +77,7 @@ void _ccv_write_rgba_raw(ccv_dense_matrix_t* x, unsigned char* data) {
         max = std::max(max, mdata[i * step + j]);
       }
     }
-    if (max == 1) { // binary image
+    if (max == 1) { // binary image TODO: remove this case
       for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
           data[4 * (i * width + j) + 0] = mdata[i * step + j] ? 255 : 0;
@@ -63,415 +99,400 @@ void _ccv_write_rgba_raw(ccv_dense_matrix_t* x, unsigned char* data) {
   }
 }
 
-int ccv_write_html(const val& source, ccv_dense_matrix_t* matrix) {
+int ccv_write_html(ccv_dense_matrix_t* matrix, const val& imageDataOrElement) {
+  // Convert ccv_dense_matrix_t::data into rgba layout first
   int width = matrix->cols;
   int height = matrix->rows;
-  unsigned char* data = (unsigned char*)malloc(4 * width * height); // TODO: this shouldn't be necessary
-  _ccv_write_rgba_raw(matrix, data);
-  val view = val(typed_memory_view(4 * width * height, data));
-  val::module_property("writeImageData")(source, view, width, height);
-  free(data);
+  unsigned char* rgba = (unsigned char*)malloc(4 * width * height); // TODO: should just write directly into the js array
+  _ccv_write_rgba_raw(matrix, rgba);
+
+  // Copy the data into the given ImageData/HTMLCanvasElement/HTMLImageElement or into a new canvas child of the element
+  val view(typed_memory_view(4 * width * height, rgba));
+  val::module_property("writeImageData")(imageDataOrElement, view, width, height);
+
+  free(rgba);
+
   return 0;
 }
 
-int ccv_read_html(val v, ccv_dense_matrix_t** image, int type) {
-  val imageData = val::module_property("readImageData")(v);
-  std::string s = imageData["data"]["buffer"].as<std::string>(); // TODO: IE's imageData.data.buffer isn't a Uint8Array
+int ccv_read_html(const val& imageDataOrCanvasImageSource, ccv_dense_matrix_t** mat, int type) {
+  // Get ImageData if it is a CanvasImageSource
+  val imageData = val::module_property("readImageData")(imageDataOrCanvasImageSource);
+
+  // Copy the rgba raw data into emscripten heap as the content of a string
+  std::string s = imageData["data"]["buffer"].as<std::string>(); // TODO: Remove `["buffer"]` after https://github.com/kripken/emscripten/pull/4511
   int width = imageData["width"].as<int>();
   int height = imageData["height"].as<int>();
+
+  // Read the rgba raw data into a ccv_dense_matrix_t*
   assert(type == CCV_IO_GRAY || type == CCV_IO_RGB_COLOR);
-  ccv_read(s.c_str(), image, CCV_IO_RGBA_RAW | type, height, width, width * 4);
+  ccv_read(s.c_str(), mat, CCV_IO_RGBA_RAW | type, height, width, width * 4);
   return 0;
 }
 
-
-
 template<typename T>
-ccv_array_t* ccv_array_concat_js_array(ccv_array_t* array, const val& jsArray) {
-  int length = jsArray["length"].as<int>();
-  for (int i = 0; i < length; i++) {
-    T temp = jsArray[i].as<T>();
-    ccv_array_push(array, &temp);
-  }
-  return array;
-}
-
-template<typename T>
-ccv_array_t* ccv_array_from_js_array(const val& jsArray) {
-  int length = jsArray["length"].as<int>();
-  ccv_array_t* array = ccv_array_new(sizeof(T), length, 0);
-  return ccv_array_concat_js_array<T>(array, jsArray);
-}
-
-template<typename T>
-val ccv_array_to_js(ccv_array_t* array) {
-  val jsArray = val::array();
-  for (int i = 0; i < array->rnum; i++) {
-    jsArray.call<void>("push", val(*(T*)ccv_array_get(array, i)));
-  }
-  return jsArray;
-}
-
-
-// TODO: Move this into ccv
-void ccv_grayscale(ccv_dense_matrix_t* a, ccv_dense_matrix_t** b) {
-  assert(CCV_GET_DATA_TYPE(a->type) == CCV_8U);
-  assert(CCV_GET_CHANNEL(a->type) == CCV_C3);
-  ccv_declare_derived_signature(sig, a->sig != 0, ccv_sign_with_literal("ccv_grayscale"), a->sig, CCV_EOF_SIGN);
-  // Note: converts type to CCV_C1 in addition to grayscaling
-  ccv_dense_matrix_t* db = *b = ccv_dense_matrix_renew(*b, a->rows, a->cols, CCV_ALL_DATA_TYPE | CCV_GET_CHANNEL(a->type), CCV_GET_DATA_TYPE(a->type) | CCV_C1, sig);
-  ccv_object_return_if_cached(, db);
-  int i, j;
-  unsigned char* aptr = a->data.u8;
-  unsigned char* bptr = db->data.u8;
-  for (i = 0; i < a->rows; i++) {
-    for (j = 0; j < a->cols; j++) {
-      bptr[j] = (unsigned char)((aptr[3 * j] * 6969 + aptr[3 * j + 1] * 23434 + aptr[3 * j + 2] * 2365) >> 15);
-    }
-    aptr += a->step;
-    bptr += db->step;
-  }
-}
-
-
-const ccv_mser_param_t ccv_mser_default_params = {
-  .min_area = 60,
-  .max_area = 100000,//(int)(image->rows * image->cols * 0.3 + 0.5),
-  .min_diversity = 0.2,
-  .area_threshold = 1.01,
-  .min_margin = 0.003,
-  .max_evolution = 200,
-  .edge_blur_sigma = sqrt(3.0),
-  .delta = 5,
-  .max_variance = 0.25,
-  .direction = CCV_DARK_TO_BRIGHT,
-};
-
-typedef struct {
-  ccv_size_t win_size; /**< The window size to compute optical flow. */
-  int level; /**< Level of image pyramids */
-  float min_eigen; /**< The minimal eigenvalue for a valid optical flow computation */
-} ccv_lucas_kanade_param_t;
-const ccv_lucas_kanade_param_t ccv_lucas_kanade_default_params = {
-  .win_size = {
-    .width = ccv_tld_default_params.win_size.width,
-    .height = ccv_tld_default_params.win_size.height
-  },
-  .level = ccv_tld_default_params.level,
-  .min_eigen = ccv_tld_default_params.min_eigen,
-};
-
-
-class CCVImage {
-public:
-  CCVImage(const CCVImage& other) = delete;
-  CCVImage& operator=(const CCVImage& other) = delete;
-  CCVImage(const CCVImage&& other) = delete;
-  CCVImage& operator=(const CCVImage&& other) = delete;
-  ~CCVImage() {}
-
-  explicit CCVImage(const val& source, int type=0) {
-    assert(!type || type == CCV_IO_GRAY || type == CCV_IO_RGB_COLOR);
-    if (source.hasOwnProperty("$$")) { // TODO: check that source.$$.ptrType.name == 'CCVImage'
-      const CCVImage& other = source.as<const CCVImage&>();
-      assert(CCV_GET_DATA_TYPE(other.imagePtr->type) == CCV_8U);
-      int channelType = CCV_GET_CHANNEL(other.imagePtr->type);
-      if (!type) {
-        type = channelType; // if not explicitly asked to convert, keep same type when copying
-      }
-      if ((channelType == CCV_C3 && type == CCV_IO_RGB_COLOR) ||
-          (channelType == CCV_C1 && type == CCV_IO_GRAY)) {
-        // Both have same IO type
-        imagePtr = other.imagePtr;
-      } else if (channelType == CCV_C3 && type == CCV_IO_GRAY) {
-        // source is colored but want gray
-        imagePtr = other.imagePtr;
-        ccv_dense_matrix_t* out = nullptr;
-        ccv_grayscale(imagePtr.get(), &out);
-        imagePtr.reset(out, &ccv_matrix_free);
-      } else {
-        assert(false);
-      }
-    } else {
-      if (!type) {
-        type = CCV_IO_GRAY;
-      }
-      ccv_dense_matrix_t* temp = nullptr;
-      ccv_read_html(source, &temp, type);
-      imagePtr.reset(temp, &ccv_matrix_free);
-    }
-  }
-
-  int getWidth() const {
-    return imagePtr->cols;
-  }
-
-  int getHeight() const {
-    return imagePtr->rows;
-  }
-
-  CCVImage* write(const val& v) {
-    ccv_write_html(v, imagePtr.get());
-    return this;
-  }
-
-  CCVImage* swtDetect(const ccv_swt_param_t& param, val callback) {
-    ccv_array_t* words = ccv_swt_detect_words(imagePtr.get(), param);
-    callback(ccv_array_to_js<ccv_rect_t>(words));
-    ccv_array_free(words);
-    return this;
-  }
-
-  CCVImage* siftMatch(const CCVImage& object_image, const ccv_sift_param_t& params, val callback) {
-    // From ccv/bin/siftmatch.c
-    ccv_dense_matrix_t* image = imagePtr.get();
-    ccv_dense_matrix_t* object = object_image.imagePtr.get();
-    ccv_array_t* obj_keypoints = 0;
-    ccv_dense_matrix_t* obj_desc = 0;
-    ccv_sift(object, &obj_keypoints, &obj_desc, 0, params);
-    ccv_array_t* image_keypoints = 0;
-    ccv_dense_matrix_t* image_desc = 0;
-    ccv_sift(image, &image_keypoints, &image_desc, 0, params);
-    int i, j, k;
-    val matches = val::array();
-    for (i = 0; i < obj_keypoints->rnum; i++)
-    {
-      float* odesc = obj_desc->data.f32 + i * 128;
-      int minj = -1;
-      double mind = 1e6, mind2 = 1e6;
-      for (j = 0; j < image_keypoints->rnum; j++)
-      {
-        float* idesc = image_desc->data.f32 + j * 128;
-        double d = 0;
-        for (k = 0; k < 128; k++)
-        {
-          d += (odesc[k] - idesc[k]) * (odesc[k] - idesc[k]);
-          if (d > mind2)
-            break;
-        }
-        if (d < mind)
-        {
-          mind2 = mind;
-          mind = d;
-          minj = j;
-        } else if (d < mind2) {
-          mind2 = d;
-        }
-      }
-      if (mind < mind2 * 0.36)
-      {
-        ccv_keypoint_t* op = (ccv_keypoint_t*)ccv_array_get(obj_keypoints, i);
-        ccv_keypoint_t* kp = (ccv_keypoint_t*)ccv_array_get(image_keypoints, minj);
-        val pair = val::array();
-        pair.call<void>("push", minj);
-        pair.call<void>("push", i);
-        matches.call<void>("push", pair);
-      }
-    }
-    callback(matches, ccv_array_to_js<ccv_keypoint_t>(image_keypoints), ccv_array_to_js<ccv_keypoint_t>(obj_keypoints));
-    ccv_array_free(obj_keypoints);
-    ccv_array_free(image_keypoints);
-    ccv_matrix_free(obj_desc);
-    ccv_matrix_free(image_desc);
-    return this;
-  }
-
-#ifdef WITH_FILESYSTEM
-  // You need to compile with "--embed-file external/ccv/samples/face.sqlite3@/" which will put the file at "/face.sqlite3" in emscripten's filesystem
-
-  CCVImage* scdDetect(const ccv_scd_param_t& param, val callback) {
-    ccv_scd_classifier_cascade_t* cascade = ccv_scd_classifier_cascade_read("/face.sqlite3");
-    assert(cascade);
-    ccv_array_t* seq = ccv_scd_detect_objects(imagePtr.get(), &cascade, 1, ccv_scd_default_params);
-    callback(ccv_array_to_js<ccv_rect_t>(seq));
-    ccv_array_free(seq);
-    ccv_scd_classifier_cascade_free(cascade);
-    return this;
-  }
-
-  CCVImage* icfDetect(const ccv_icf_param_t& param, val callback) {
-    ccv_dense_matrix_t* image = imagePtr.get();
-    ccv_icf_classifier_cascade_t* cascade = ccv_icf_read_classifier_cascade("/pedestrian.icf");
-    ccv_array_t* seq = ccv_icf_detect_objects(image, &cascade, 1, ccv_icf_default_params);
-    callback(ccv_array_to_js<ccv_comp_t>(seq));
-    ccv_array_free(seq);
-    ccv_icf_classifier_cascade_free(cascade);
-    return this;
-  }
-
-  CCVImage* dpmDetect(const ccv_dpm_param_t& param, val callback, int model_type = 0/*0: pedestrian, 1: car*/) {
-    ccv_dense_matrix_t* image = imagePtr.get();
-    ccv_dpm_mixture_model_t* model;
-    if (model_type) {
-      model = ccv_dpm_read_mixture_model("/car.m");
-    } else {
-      model = ccv_dpm_read_mixture_model("/pedestrian.m");
-    }
-    ccv_array_t* seq = ccv_dpm_detect_objects(image, &model, 1, ccv_dpm_default_params);
-    if (seq) {
-      callback(ccv_array_to_js<ccv_root_comp_t>(seq));
-      ccv_array_free(seq);
-    } else {
-      callback(val::array());
-    }
-    ccv_dpm_mixture_model_free(model);
-    return this;
-  }
-#endif
-
-  CCVImage* mser(const CCVImage& outline, const ccv_mser_param_t& params, val callback) {
-    ccv_dense_matrix_t* yuv = imagePtr.get();
-    // ccv_color_transform(image, &yuv, 0, CCV_RGB_TO_YUV);
-    ccv_dense_matrix_t* mser = 0;
-    ccv_array_t* mser_keypoint = ccv_mser(yuv, outline.imagePtr.get(), &mser, 0, params);
-    callback(
-      ccv_array_to_js<ccv_mser_keypoint_t>(mser_keypoint),
-      val(typed_memory_view(4 * mser->cols * mser->rows, mser->data.u8)),
-      mser->cols,
-      mser->rows
-    );
-    ccv_array_free(mser_keypoint);
-    ccv_matrix_free(mser);
-    return this;
-  }
-
-  CCVImage* closeOutline() {
-    ccv_dense_matrix_t* out = nullptr;
-    ccv_close_outline(imagePtr.get(), &out, 0);
-    imagePtr.reset(out, &ccv_matrix_free);
-    return this;
-  }
-
-  CCVImage* canny(int size, double low_thresh, double high_thresh) {
-    ccv_dense_matrix_t* canny = nullptr;
-    ccv_canny(imagePtr.get(), &canny, 0, size, low_thresh, high_thresh);
-    imagePtr.reset(canny, &ccv_matrix_free);
-    return this;
-  }
-
-  CCVImage* flipX() {
-    ccv_dense_matrix_t* out = nullptr;
-    ccv_flip(imagePtr.get(), &out, 0, CCV_FLIP_X);
-    imagePtr.reset(out, &ccv_matrix_free);
-    return this;
-  }
-
-  CCVImage* slice(ccv_rect_t rect) {
-    ccv_dense_matrix_t* out = nullptr;
-    ccv_slice(imagePtr.get(), (ccv_matrix_t**)&out, 0, rect.y, rect.x, rect.height, rect.width);
-    imagePtr.reset(out, &ccv_matrix_free);
-    return this;
-  }
-
-  CCVImage* blur(double sigma) {
-    ccv_dense_matrix_t* out = nullptr;
-    ccv_blur(imagePtr.get(), &out, 0, sigma);
-    imagePtr.reset(out, &ccv_matrix_free);
-    return this;
-  }
-
-
-  std::shared_ptr<ccv_dense_matrix_t> imagePtr;
-};
-
-
-
-struct TLDDeleter {
-  void operator()(ccv_tld_t* ptr) {
-    ccv_tld_free(ptr);
+struct Deleter;
+template<>
+struct Deleter<ccv_dense_matrix_t> {
+  void operator()(ccv_dense_matrix_t* ptr) {
+    ccv_matrix_free(ptr);
   }
 };
-class TLDTracker {
-public:
-  TLDTracker(const TLDTracker& other) = delete;
-  TLDTracker& operator=(const TLDTracker& other) = delete;
-  TLDTracker(const TLDTracker&& other) = delete;
-  TLDTracker& operator=(const TLDTracker&& other) = delete;
-  ~TLDTracker() {}
-
-  TLDTracker(const CCVImage& ccv_image, const ccv_rect_t& box, const ccv_tld_param_t& params = ccv_tld_default_params) {
-    prevFrame = ccv_image.imagePtr;
-    tld.reset(ccv_tld_new(prevFrame.get(), box, params));
-  }
-
-  void track(const CCVImage& ccv_image, val callback) {
-    ccv_tld_info_t info;
-    ccv_comp_t newbox = ccv_tld_track_object(tld.get(), prevFrame.get(), ccv_image.imagePtr.get(), &info);
-    prevFrame = ccv_image.imagePtr;
-    callback(info, tld->box, ccv_array_to_js<ccv_comp_t>(tld->top));
-  }
-
-private:
-  std::shared_ptr<ccv_dense_matrix_t> prevFrame;
-  std::unique_ptr<ccv_tld_t, TLDDeleter> tld;
-};
-
-
-struct CCVArrayDeleter {
+template<>
+struct Deleter<ccv_array_t> {
   void operator()(ccv_array_t* ptr) {
     ccv_array_free(ptr);
   }
 };
-class LucasKanadeTracker {
-public:
-  LucasKanadeTracker(const LucasKanadeTracker& other) = delete;
-  LucasKanadeTracker& operator=(const LucasKanadeTracker& other) = delete;
-  LucasKanadeTracker(const LucasKanadeTracker&& other) = delete;
-  LucasKanadeTracker& operator=(const LucasKanadeTracker&& other) = delete;
-  ~LucasKanadeTracker() {}
-
-  LucasKanadeTracker(const ccv_lucas_kanade_param_t& p = ccv_lucas_kanade_default_params) : param(p) {}
-  void track(const CCVImage& ccv_image, val callback) {
-    if (prevPoints && prevPoints->rnum) {
-      if (!prevFrame) {
-        prevFrame = ccv_image.imagePtr;
-      }
-      const std::shared_ptr<ccv_dense_matrix_t>& frame = ccv_image.imagePtr;
-      ccv_array_t* pointsWithStatus = 0;
-      ccv_optical_flow_lucas_kanade(prevFrame.get(), frame.get(), prevPoints.get(), &pointsWithStatus, param.win_size, param.level, param.min_eigen);
-      callback(
-        ccv_array_to_js<ccv_decimal_point_t>(prevPoints.get()),
-        ccv_array_to_js<ccv_decimal_point_with_status_t>(pointsWithStatus)
-      );
-
-      // Filter out points with status == 0
-      ccv_array_t* points = ccv_array_new(sizeof(ccv_decimal_point_t), 0, 0);
-      int numPoints = pointsWithStatus->rnum;
-      for (int i = 0; i < pointsWithStatus->rnum; i++) {
-        ccv_decimal_point_with_status_t* p = (ccv_decimal_point_with_status_t*)ccv_array_get(pointsWithStatus, i);
-        if (p->status) {
-          ccv_array_push(points, &p->point);
-        }
-      }
-      prevPoints.reset(points);
-    } else {
-      callback(val::array(), val::array());
-    }
-    prevFrame = ccv_image.imagePtr;
+template<>
+struct Deleter<ccv_tld_info_t> { // TODO: should just use unique_ptr's default_delete
+  void operator()(ccv_tld_info_t* ptr) {
+    free(ptr);
   }
-
-  void addPoints(const val& additionalPoints) {
-    if (prevPoints) {
-      ccv_array_concat_js_array<ccv_decimal_point_t>(prevPoints.get(), additionalPoints);
-    } else {
-      ccv_array_t* points = ccv_array_from_js_array<ccv_decimal_point_t>(additionalPoints);
-      prevPoints.reset(points);
-    }
+};
+template<>
+struct Deleter<ccv_tld_t> {
+  void operator()(ccv_tld_t* ptr) {
+    ccv_tld_free(ptr);
   }
-
-private:
-  std::shared_ptr<ccv_dense_matrix_t> prevFrame;
-  std::unique_ptr<ccv_array_t, CCVArrayDeleter> prevPoints;
-  ccv_lucas_kanade_param_t param;
+};
+template<>
+struct Deleter<ccv_dpm_mixture_model_t> {
+  void operator()(ccv_dpm_mixture_model_t* ptr) {
+    ccv_dpm_mixture_model_free(ptr);
+  }
+};
+template<>
+struct Deleter<ccv_icf_classifier_cascade_t> {
+  void operator()(ccv_icf_classifier_cascade_t* ptr) {
+    ccv_icf_classifier_cascade_free(ptr);
+  }
+};
+template<>
+struct Deleter<ccv_scd_classifier_cascade_t> {
+  void operator()(ccv_scd_classifier_cascade_t* ptr) {
+    ccv_scd_classifier_cascade_free(ptr);
+  }
 };
 
+template<typename T>
+class PtrBase {
+public:
+  PtrBase() {};
+  PtrBase(T* ptr) : pointer(ptr) {}
 
-int main() {
-  ccv_enable_default_cache();
+  operator T*() const {
+    return pointer.get();
+  }
+  operator T**() {
+    // TODO: This is bad. Want to allow setting the unique_ptr via a T**
+    return (T**)&pointer;
+  }
 
-  EM_ASM({
-    //console.log('ready', Module);
-  });
+protected:
+  std::unique_ptr<T, Deleter<T>> pointer = nullptr;
+};
+
+template<typename T, typename E=void> // E is only needed as the element type when T == ccv_array_t
+class Ptr : public PtrBase<T> {
+public:
+  Ptr() {};
+  Ptr(T* ptr) : PtrBase<T>(ptr) {};
+};
+
+template<>
+class Ptr<ccv_dense_matrix_t> : public PtrBase<ccv_dense_matrix_t> {
+public:
+  Ptr() {};
+  Ptr(ccv_dense_matrix_t* ptr) : PtrBase<ccv_dense_matrix_t>(ptr) {};
+
+  int getRows() {
+    return pointer->rows;
+  }
+
+  int getCols() {
+    return pointer->cols;
+  }
+
+  int getStep() {
+    return pointer->step;
+  }
+
+  int getType() {
+    return pointer->type;
+  }
+
+  int getDataType() {
+    return CCV_GET_DATA_TYPE(pointer->type);
+  }
+
+  int getDataTypeSize() {
+    return CCV_GET_DATA_TYPE_SIZE(pointer->type);
+  }
+
+  int getChannel() {
+    return CCV_GET_CHANNEL(pointer->type);
+  }
+
+  int getDataSize() {
+    return pointer->step * pointer->rows;
+  }
+
+  val getData() {
+    int numElement = getDataSize() / getDataTypeSize();
+    switch(getDataType()) {
+      case CCV_8U:
+        return val(typed_memory_view(numElement, pointer->data.u8));
+      case CCV_32S:
+        return val(typed_memory_view(numElement, pointer->data.i32));
+      case CCV_32F:
+        return val(typed_memory_view(numElement, pointer->data.f32));
+      case CCV_64S:
+        return val(typed_memory_view(numElement, pointer->data.i64));
+      case CCV_64F:
+        return val(typed_memory_view(numElement, pointer->data.f64));
+      default:
+        return val::null();
+    }
+  }
+};
+
+template<typename T>
+class Ptr<ccv_array_t, T> : public PtrBase<ccv_array_t> {
+public:
+  Ptr() {};
+  Ptr(ccv_array_t* ptr) : PtrBase<ccv_array_t>(ptr) {};
+
+  void init() {
+    pointer.reset(ccv_array_new(sizeof(T), 0, 0));
+  }
+
+  int size() {
+    assert(pointer);
+    return pointer->rnum;
+  }
+
+  void push(const T& x) {
+    assert(pointer);
+    ccv_array_push(pointer.get(), &x);
+  }
+
+  val get(int i) {
+    assert(pointer);
+    return val(*(T*)ccv_array_get(pointer.get(), i));
+  }
+
+  val toJS() {
+    assert(pointer);
+    val jsArray = val::array();
+    for (int i = 0; i < pointer->rnum; i++) {
+      jsArray.call<void>("push", get(i));
+    }
+    return jsArray;
+  }
+};
+
+template<>
+class Ptr<ccv_tld_t> : public PtrBase<ccv_tld_t> {
+public:
+  Ptr() {};
+  Ptr(ccv_tld_t* ptr) : PtrBase<ccv_tld_t>(ptr) {};
+
+  val getTop() {
+    val jsArray = val::array();
+    for (int i = 0; i < pointer->top->rnum; i++) {
+      jsArray.call<void>("push", val(*(ccv_comp_t*)ccv_array_get(pointer->top, i)));
+    }
+    return jsArray;
+  }
+
+  val getBox() {
+    return val(pointer->box);
+  }
+};
+
+template<>
+class Ptr<ccv_tld_info_t> : public PtrBase<ccv_tld_info_t> {
+public:
+  Ptr() : PtrBase() {};
+
+  void init() {
+    pointer.reset(new ccv_tld_info_t());
+  }
+
+  val toJS() {
+    assert(pointer);
+    return val(*pointer);
+  }
+};
+
+// int ccv_read(const char *in, ccv_dense_matrix_t **x, int type)
+int ccvjs_read(val source, Ptr<ccv_dense_matrix_t>& out, int type) {
+  assert(type == CCV_IO_GRAY || type == CCV_IO_RGB_COLOR);
+  return ccv_read_html(source, out, type);
+}
+int ccvjs_read(val source, Ptr<ccv_dense_matrix_t>& out) {
+  return ccvjs_read(source, out, CCV_IO_GRAY);
+}
+
+// int ccv_write(ccv_dense_matrix_t *mat, char *out, int *len, int type, void *conf)
+int ccvjs_write(const Ptr<ccv_dense_matrix_t>& mat, val out) {
+  return ccv_write_html(mat, out);
+}
+
+// ccv_tld_t* ccv_tld_new(ccv_dense_matrix_t* a, ccv_rect_t box, ccv_tld_param_t params);
+Ptr<ccv_tld_t> ccvjs_tld_new(const Ptr<ccv_dense_matrix_t>& a, ccv_rect_t box, ccv_tld_param_t params = ccv_tld_default_params) {
+  return ccv_tld_new(a, box, params);
+}
+
+// ccv_comp_t ccv_tld_track_object(ccv_tld_t* tld, ccv_dense_matrix_t* a, ccv_dense_matrix_t* b, ccv_tld_info_t* info);
+ccv_comp_t ccvjs_tld_track_object(const Ptr<ccv_tld_t>& tld, const Ptr<ccv_dense_matrix_t>& a, const Ptr<ccv_dense_matrix_t>& b, Ptr<ccv_tld_info_t>& info) {
+  return ccv_tld_track_object(tld, a, b, info);
+}
+
+// ccv_array_t* ccv_swt_detect_words(ccv_dense_matrix_t* a, ccv_swt_param_t params);
+Ptr<ccv_array_t, ccv_rect_t> ccvjs_swt_detect_words(const Ptr<ccv_dense_matrix_t>& a, ccv_swt_param_t params = ccv_swt_default_params) {
+  return ccv_swt_detect_words(a, params);
+}
+
+// void ccv_sift(ccv_dense_matrix_t* a, ccv_array_t** keypoints, ccv_dense_matrix_t** desc, int type, ccv_sift_param_t params);
+void ccvjs_sift(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_array_t, ccv_keypoint_t>& keypoints, Ptr<ccv_dense_matrix_t>& desc, int type, ccv_sift_param_t params = ccv_sift_default_params) {
+   ccv_sift(a, keypoints, desc, type, params);
+}
+
+// From ccv/bin/siftmatch.c
+val ccvjs_sift_match(const Ptr<ccv_dense_matrix_t>& desc1, const Ptr<ccv_array_t, ccv_keypoint_t>& kp1, const Ptr<ccv_dense_matrix_t>& desc2, const Ptr<ccv_array_t, ccv_keypoint_t>& kp2) {
+  double ratio = 0.36;
+
+  ccv_array_t* image_keypoints = kp1;
+  ccv_dense_matrix_t* image_desc = desc1;
+  ccv_array_t* obj_keypoints = kp2;
+  ccv_dense_matrix_t* obj_desc = desc2;
+
+  int i, j, k;
+  val matches = val::array();
+  for (i = 0; i < obj_keypoints->rnum; i++) {
+    float* odesc = obj_desc->data.f32 + i * 128;
+    int minj = -1;
+    double mind = 1e6, mind2 = 1e6;
+    for (j = 0; j < image_keypoints->rnum; j++) {
+      float* idesc = image_desc->data.f32 + j * 128;
+      double d = 0;
+      for (k = 0; k < 128; k++) {
+        d += (odesc[k] - idesc[k]) * (odesc[k] - idesc[k]);
+        if (d > mind2)
+          break;
+      }
+      if (d < mind) {
+        mind2 = mind;
+        mind = d;
+        minj = j;
+      } else if (d < mind2) {
+        mind2 = d;
+      }
+    }
+    if (mind < mind2 * ratio) {
+      ccv_keypoint_t* op = (ccv_keypoint_t*)ccv_array_get(obj_keypoints, i);
+      ccv_keypoint_t* kp = (ccv_keypoint_t*)ccv_array_get(image_keypoints, minj);
+      val pair = val::array();
+      pair.call<void>("push", minj);
+      pair.call<void>("push", i);
+      matches.call<void>("push", pair);
+    }
+  }
+  return matches;
+}
+
+
+#ifdef WITH_FILESYSTEM
+
+// ccv_scd_classifier_cascade_t* ccv_scd_classifier_cascade_read(const char* filename);
+Ptr<ccv_scd_classifier_cascade_t> ccvjs_scd_classifier_cascade_read(const std::string& filename) {
+  return ccv_scd_classifier_cascade_read(filename.c_str());
+}
+
+// ccv_array_t* ccv_scd_detect_objects(ccv_dense_matrix_t* a, ccv_scd_classifier_cascade_t** cascades, int count, ccv_scd_param_t params);
+Ptr<ccv_array_t, ccv_rect_t> ccvjs_scd_detect_objects(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_scd_classifier_cascade_t>& cascades, int count, ccv_scd_param_t params = ccv_scd_default_params) {
+  return ccv_scd_detect_objects(a, cascades, count, params);
+}
+
+// ccv_icf_classifier_cascade_t* ccv_icf_read_classifier_cascade(const char* filename);
+Ptr<ccv_icf_classifier_cascade_t> ccvjs_icf_read_classifier_cascade(const std::string& filename) {
+  return ccv_icf_read_classifier_cascade(filename.c_str());
+}
+
+// ccv_array_t* ccv_icf_detect_objects(ccv_dense_matrix_t* a, void* cascade, int count, ccv_icf_param_t params);
+Ptr<ccv_array_t, ccv_comp_t> ccvjs_icf_detect_objects(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_icf_classifier_cascade_t>& cascade, int count, ccv_icf_param_t params = ccv_icf_default_params) {
+  return ccv_icf_detect_objects(a, (ccv_icf_classifier_cascade_t**)cascade, count, params);
+}
+
+// ccv_dpm_mixture_model_t* ccv_dpm_read_mixture_model(const char* directory);
+Ptr<ccv_dpm_mixture_model_t> ccvjs_dpm_read_mixture_model(std::string directory) {
+  return ccv_dpm_read_mixture_model(directory.c_str());
+}
+
+// ccv_array_t* ccv_dpm_detect_objects(ccv_dense_matrix_t* a, ccv_dpm_mixture_model_t** model, int count, ccv_dpm_param_t params);
+Ptr<ccv_array_t, ccv_root_comp_t> ccvjs_dpm_detect_objects(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dpm_mixture_model_t>& cascades, int count, ccv_dpm_param_t params = ccv_dpm_default_params) {
+  return ccv_dpm_detect_objects(a, cascades, count, params);
+}
+
+#endif // WITH_FILESYSTEM
+
+// ccv_array_t* ccv_mser(ccv_dense_matrix_t* a, ccv_dense_matrix_t* h, ccv_dense_matrix_t** b, int type, ccv_mser_param_t params);
+Ptr<ccv_array_t, ccv_mser_keypoint_t> ccvjs_mser(const Ptr<ccv_dense_matrix_t>& a, const Ptr<ccv_dense_matrix_t>& h, Ptr<ccv_dense_matrix_t>& b, int type, ccv_mser_param_t params = ccv_mser_default_params) {
+  return ccv_mser(a, h, b, type, params);
+}
+
+// void ccv_canny(ccv_dense_matrix_t *a, ccv_dense_matrix_t **b, int type, int size, double low_thresh, double high_thresh)
+void ccvjs_canny(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dense_matrix_t>& b, int type, int size, double low_thresh, double high_thresh) {
+  ccv_canny(a, b, type, size, low_thresh, high_thresh);
+}
+
+// void ccv_close_outline(ccv_dense_matrix_t* a, ccv_dense_matrix_t** b, int type);
+void ccvjs_close_outline(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dense_matrix_t>& b, int type) {
+  ccv_close_outline(a, b, type);
+}
+
+// void ccv_flip(ccv_dense_matrix_t *a, ccv_dense_matrix_t **b, int btype, int type)
+void ccvjs_flip(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dense_matrix_t>& b, int btype, int type) {
+  ccv_flip(a, b, btype, type);
+}
+
+// void ccv_slice(ccv_matrix_t *a, ccv_matrix_t **b, int btype, int y, int x, int rows, int cols)
+void ccvjs_slice(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dense_matrix_t>& b, int btype, int y, int x, int rows, int cols) {
+  ccv_slice(a, (ccv_matrix_t**)(ccv_dense_matrix_t**)b, btype, y, x, rows, cols);
+}
+void ccvjs_slice(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dense_matrix_t>& b, int btype, ccv_rect_t rect) {
+  ccv_slice(a, (ccv_matrix_t**)(ccv_dense_matrix_t**)b, btype, rect.y, rect.x, rect.height, rect.width);
+}
+
+// void ccv_blur(ccv_dense_matrix_t *a, ccv_dense_matrix_t **b, int type, double sigma)
+void ccvjs_blur(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dense_matrix_t>& b, int type, double sigma) {
+  ccv_blur(a, b, type, sigma);
+}
+
+//void ccv_sample_down(ccv_dense_matrix_t* a, ccv_dense_matrix_t** b, int type, int src_x, int src_y);
+void ccvjs_sample_down(const Ptr<ccv_dense_matrix_t>& a, Ptr<ccv_dense_matrix_t>& b, int type, int src_x, int src_y) {
+  ccv_sample_down(a, b, type, src_x, src_y);
+}
+
+// void ccv_optical_flow_lucas_kanade(ccv_dense_matrix_t *a, ccv_dense_matrix_t *b, ccv_array_t *point_a, ccv_array_t **point_b, ccv_size_t win_size, int level, double min_eigen)
+void ccvjs_optical_flow_lucas_kanade(const Ptr<ccv_dense_matrix_t>& a, const Ptr<ccv_dense_matrix_t>& b, const Ptr<ccv_array_t, ccv_decimal_point_t>& point_a, Ptr<ccv_array_t, ccv_decimal_point_with_status_t>& point_b, ccv_size_t win_size, int level, double min_eigen) {
+  ccv_optical_flow_lucas_kanade(a, b, point_a, point_b, win_size, level, min_eigen);
+}
+void ccvjs_optical_flow_lucas_kanade(const Ptr<ccv_dense_matrix_t>& a, const Ptr<ccv_dense_matrix_t>& b, const Ptr<ccv_array_t, ccv_decimal_point_t>& point_a, Ptr<ccv_array_t, ccv_decimal_point_with_status_t>& point_b, ccv_lucas_kanade_param_t params = ccv_lucas_kanade_default_params) {
+  ccv_optical_flow_lucas_kanade(a, b, point_a, point_b, params.win_size, params.level, params.min_eigen);
+}
+
+template<typename T>
+void register_ccv_array(const char* name) {
+  class_<Ptr<ccv_array_t, T>>(name)
+    .constructor()
+    .function("init", &Ptr<ccv_array_t, T>::init)
+    .function("get", &Ptr<ccv_array_t, T>::get)
+    .function("push", &Ptr<ccv_array_t, T>::push)
+    .function("size", &Ptr<ccv_array_t, T>::size)
+    .function("toJS", &Ptr<ccv_array_t, T>::toJS);
 }
 
 template<typename T, std::size_t... I>
@@ -484,75 +505,113 @@ void register_array(const char* name) {
   register_array_elements(temp, std::make_index_sequence<N>());
 }
 
-
 EMSCRIPTEN_BINDINGS(ccv_js_module) {
-  // TODO: Wanted method chaining for CCVImage so initially had each method return a reference.
-  // But embind will then create a copy of that reference for returning to the JS layer.
-  // https://github.com/kripken/emscripten/issues/3480
-  //
-  // Returning pointers is syntactically the same in JS and gets around the copying problem.
-  class_<CCVImage>("CCVImage")
-    .constructor<val>()
-    .constructor<val, int>()
-    .function("getWidth", &CCVImage::getWidth)
-    .function("getHeight", &CCVImage::getHeight)
-    .function("write", &CCVImage::write, allow_raw_pointers())
-    .function("swtDetect", &CCVImage::swtDetect, allow_raw_pointers())
-    .function("siftMatch", &CCVImage::siftMatch, allow_raw_pointers())
-#ifdef WITH_FILESYSTEM
-    .function("scdDetect", &CCVImage::scdDetect, allow_raw_pointers())
-    .function("icfDetect", &CCVImage::icfDetect, allow_raw_pointers())
-    .function("dpmDetect", &CCVImage::dpmDetect, allow_raw_pointers())
-#endif
-    .function("mser", &CCVImage::mser, allow_raw_pointers())
-    .function("canny", &CCVImage::canny, allow_raw_pointers())
-    .function("closeOutline", &CCVImage::closeOutline, allow_raw_pointers())
-    .function("flipX", &CCVImage::flipX, allow_raw_pointers())
-    .function("slice", &CCVImage::slice, allow_raw_pointers())
-    .function("blur", &CCVImage::blur, allow_raw_pointers());
-
-  class_<TLDTracker>("TLDTracker")
-    .constructor<const CCVImage&, const ccv_rect_t&>()
-    .constructor<const CCVImage&, const ccv_rect_t&, const ccv_tld_param_t&>()
-    .function("track", &TLDTracker::track);
-
-  class_<LucasKanadeTracker>("LucasKanadeTracker")
+  class_<Ptr<ccv_dense_matrix_t>>("ccv_dense_matrix_t")
     .constructor()
-    .constructor<const ccv_lucas_kanade_param_t&>()
-    .function("track", &LucasKanadeTracker::track)
-    .function("addPoints", &LucasKanadeTracker::addPoints);
+    .function("getRows", &Ptr<ccv_dense_matrix_t>::getRows)
+    .function("getCols", &Ptr<ccv_dense_matrix_t>::getCols)
+    .function("getStep", &Ptr<ccv_dense_matrix_t>::getStep)
+    .function("getType", &Ptr<ccv_dense_matrix_t>::getType)
+    .function("getDataType", &Ptr<ccv_dense_matrix_t>::getDataType)
+    .function("getDataTypeSize", &Ptr<ccv_dense_matrix_t>::getDataTypeSize)
+    .function("getChannel", &Ptr<ccv_dense_matrix_t>::getChannel)
+    .function("getDataSize", &Ptr<ccv_dense_matrix_t>::getDataSize)
+    .function("getData", &Ptr<ccv_dense_matrix_t>::getData);
+  class_<Ptr<ccv_tld_t>>("ccv_tld_t")
+    .constructor()
+    .function("getTop", &Ptr<ccv_tld_t>::getTop)
+    .function("getBox", &Ptr<ccv_tld_t>::getBox);
+#ifdef WITH_FILESYSTEM
+  class_<Ptr<ccv_scd_classifier_cascade_t>>("ccv_scd_classifier_cascade_t").constructor();
+  class_<Ptr<ccv_icf_classifier_cascade_t>>("ccv_icf_classifier_cascade_t").constructor();
+  class_<Ptr<ccv_dpm_mixture_model_t>>("ccv_dpm_mixture_model_t").constructor();
+#endif
+  class_<Ptr<ccv_tld_info_t>>("ccv_tld_info_t")
+    .function("init", &Ptr<ccv_tld_info_t>::init)
+    .function("toJS", &Ptr<ccv_tld_info_t>::toJS)
+    .constructor();
+  register_ccv_array<ccv_rect_t>("ccv_rect_array");
+  register_ccv_array<ccv_comp_t>("ccv_comp_array");
+  register_ccv_array<ccv_keypoint_t>("ccv_keypoint_array");
+  register_ccv_array<ccv_root_comp_t>("ccv_root_comp_array");
+  register_ccv_array<ccv_mser_keypoint_t>("ccv_mser_keypoint_array");
+  register_ccv_array<ccv_decimal_point_t>("ccv_decimal_point_array");
+  register_ccv_array<ccv_decimal_point_with_status_t>("ccv_decimal_point_with_status_array");
+
+  // TODO: select_overload doesn't work for functions with default args
+  function("ccv_read", select_overload<int(val, Ptr<ccv_dense_matrix_t>&, int)>(&ccvjs_read));
+  function("ccv_read", select_overload<int(val, Ptr<ccv_dense_matrix_t>&)>(&ccvjs_read));
+  function("ccv_write", &ccvjs_write);
+  function("ccv_tld_new", &ccvjs_tld_new);
+  function("ccv_tld_track_object", &ccvjs_tld_track_object);
+  function("ccv_swt_detect_words", &ccvjs_swt_detect_words);
+  function("ccv_sift", &ccvjs_sift);
+  function("ccv_sift_match", &ccvjs_sift_match);
+#ifdef WITH_FILESYSTEM
+  function("ccv_scd_classifier_cascade_read", &ccvjs_scd_classifier_cascade_read);
+  function("ccv_scd_detect_objects", &ccvjs_scd_detect_objects);
+  function("ccv_icf_read_classifier_cascade", &ccvjs_icf_read_classifier_cascade);
+  function("ccv_icf_detect_objects", &ccvjs_icf_detect_objects);
+  function("ccv_dpm_read_mixture_model", &ccvjs_dpm_read_mixture_model);
+  function("ccv_dpm_detect_objects", &ccvjs_dpm_detect_objects);
+#endif
+  function("ccv_mser", &ccvjs_mser);
+  function("ccv_canny", &ccvjs_canny);
+  function("ccv_close_outline", &ccvjs_close_outline);
+  function("ccv_flip", &ccvjs_flip);
+  function("ccv_slice", select_overload<void(const Ptr<ccv_dense_matrix_t>&, Ptr<ccv_dense_matrix_t>&, int, int, int, int, int)>(&ccvjs_slice));
+  function("ccv_slice", select_overload<void(const Ptr<ccv_dense_matrix_t>&, Ptr<ccv_dense_matrix_t>&, int, ccv_rect_t)>(&ccvjs_slice));
+  function("ccv_blur", &ccvjs_blur);
+  function("ccv_sample_down", &ccvjs_sample_down);
+  function("ccv_optical_flow_lucas_kanade", select_overload<void(const Ptr<ccv_dense_matrix_t>&, const Ptr<ccv_dense_matrix_t>&, const Ptr<ccv_array_t, ccv_decimal_point_t>&, Ptr<ccv_array_t, ccv_decimal_point_with_status_t>&, ccv_size_t, int, double)>(&ccvjs_optical_flow_lucas_kanade));
+  function("ccv_optical_flow_lucas_kanade", select_overload<void(const Ptr<ccv_dense_matrix_t>&, const Ptr<ccv_dense_matrix_t>&, const Ptr<ccv_array_t, ccv_decimal_point_t>&, Ptr<ccv_array_t, ccv_decimal_point_with_status_t>&, ccv_lucas_kanade_param_t)>(&ccvjs_optical_flow_lucas_kanade));
 
 
-  /*
-  enum_<decltype(CCV_C1)>("enumChannels")
-    .value("CCV_C1", CCV_C1)
-    .value("CCV_C2", CCV_C2)
-    .value("CCV_C3", CCV_C3)
-    .value("CCV_C4", CCV_C4);
+#ifdef WITH_FILESYSTEM
+  // Location of the trained models in the emscripten filesystem.
+  // For example the build flag "--embed-file external/ccv/samples/face.sqlite3@/" will put that file into the root of the emscripten filesystem.
+  std::string CCV_SCD_FACE_FILE = "/face.sqlite3";
+  std::string CCV_ICF_PEDESTRIAN_FILE = "/pedestrian.icf";
+  std::string CCV_DPM_PEDESTRIAN_FILE = "/pedestrian.m";
+  std::string CCV_DPM_CAR_FILE = "/car.m";
+  constant("CCV_SCD_FACE_FILE", CCV_SCD_FACE_FILE);
+  constant("CCV_ICF_PEDESTRIAN_FILE", CCV_ICF_PEDESTRIAN_FILE);
+  constant("CCV_DPM_PEDESTRIAN_FILE", CCV_DPM_PEDESTRIAN_FILE);
+  constant("CCV_DPM_CAR_FILE", CCV_DPM_CAR_FILE);
+#endif
 
-  enum_<decltype(CCV_8U)>("enumDataType")
-    .value("CCV_8U ", CCV_8U)
-    .value("CCV_32S", CCV_32S)
-    .value("CCV_32F", CCV_32F)
-    .value("CCV_64S", CCV_64S)
-    .value("CCV_64F", CCV_64F);
 
-  enum_<decltype(CCV_IO_GRAY)>("enumIO")
-    .value("CCV_IO_RGB_COLOR", CCV_IO_RGB_COLOR)
-    .value("CCV_IO_GRAY", CCV_IO_GRAY);
-  */
+
+  constant("CCV_C1", (int)CCV_C1);
+  constant("CCV_C2", (int)CCV_C2);
+  constant("CCV_C3", (int)CCV_C3);
+  constant("CCV_C4", (int)CCV_C4);
+  constant("CCV_8U ", (int)CCV_8U);
+  constant("CCV_32S", (int)CCV_32S);
+  constant("CCV_32F", (int)CCV_32F);
+  constant("CCV_64S", (int)CCV_64S);
+  constant("CCV_64F", (int)CCV_64F);
   constant("CCV_IO_RGB_COLOR", (int)CCV_IO_RGB_COLOR);
   constant("CCV_IO_GRAY", (int)CCV_IO_GRAY);
+  constant("CCV_FLIP_X", (int)CCV_FLIP_X);
+  constant("CCV_FLIP_Y", (int)CCV_FLIP_Y);
+  constant("CCV_DARK_TO_BRIGHT", (int)CCV_DARK_TO_BRIGHT);
+  constant("CCV_BRIGHT_TO_DARK", (int)CCV_BRIGHT_TO_DARK);
+
 
 
   constant("ccv_tld_default_params", ccv_tld_default_params);
-  constant("ccv_lucas_kanade_default_params", ccv_lucas_kanade_default_params);
   constant("ccv_swt_default_params", ccv_swt_default_params);
   constant("ccv_sift_default_params", ccv_sift_default_params);
+#ifdef WITH_FILESYSTEM
   constant("ccv_scd_default_params", ccv_scd_default_params);
   constant("ccv_icf_default_params", ccv_icf_default_params);
   constant("ccv_dpm_default_params", ccv_dpm_default_params);
+#endif
   constant("ccv_mser_default_params", ccv_mser_default_params);
+  constant("ccv_lucas_kanade_default_params", ccv_lucas_kanade_default_params);
+
+
 
 
   value_object<ccv_rect_t>("ccv_rect_t")
@@ -616,9 +675,6 @@ EMSCRIPTEN_BINDINGS(ccv_js_module) {
     .field("clustered_detects", &ccv_tld_info_t::clustered_detects)
     .field("confident_matches", &ccv_tld_info_t::confident_matches)
     .field("close_matches", &ccv_tld_info_t::close_matches);
-
-
-
 
 
 
@@ -740,5 +796,4 @@ EMSCRIPTEN_BINDINGS(ccv_js_module) {
   value_object<ccv_decimal_point_with_status_t>("ccv_decimal_point_with_status_t")
     .field("point", &ccv_decimal_point_with_status_t::point)
     .field("status", &ccv_decimal_point_with_status_t::status);
-
 }

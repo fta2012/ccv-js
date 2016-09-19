@@ -1,72 +1,59 @@
 Module = Module || {};
+
 Module.isImageData = function(element) {
-  return element instanceof ImageData || (
-    typeof element === 'object' &&
-    'width' in element &&
-    'height' in element &&
-    'data' in element &&
-    (element.data instanceof Uint8Array || element.data instanceof Uint8ClampedArray)
+  return element instanceof ImageData;
+};
+
+Module.isCanvasImageSource = function(element) {
+  return (
+    element instanceof HTMLCanvasElement ||
+    element instanceof HTMLImageElement ||
+    element instanceof HTMLVideoElement ||
+    element instanceof ImageBitmap
   );
 };
 
-Module.getElement = function(source) {
-  if (!document) {
-    console.log("Can't use dom in webworker");
+Module.toCanvas = function(source) {
+  console.assert(Module.isCanvasImageSource(source));
+  if (source instanceof HTMLCanvasElement) {
+    return source;
   }
-  var element = null;
-  // TODO instanceof jQuery?
-  if (source instanceof HTMLElement) {
-    element = source;
-  } else if (typeof source ==='string' || source instanceof String) {
-    // Selector to an element or id of an element
-    element = document.querySelector(source) || document.getElementById(source);
-  }
-  return element;
+  var canvas = document.createElement('canvas'); // draw to a temp canvas
+  canvas.width = source.videoWidth || source.naturalWidth || source.width;
+  canvas.height =  source.videoHeight || source.naturalHeight || source.height;
+  canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas;
 };
 
-// Reads image data from ImageData or HTMLCanvasElement/HTMLImageElement/HTMLVideoElement(or string selector)
+// Reads image data from ImageData or CanvasImageSource(HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap)
+// TODO: maybe CanvasRenderingContext2D and Blob also?
 Module.readImageData = function(source) {
   console.assert(source);
-  var imageData;
   if (Module.isImageData(source)) {
-    // ImageData
-    imageData = source;
-  } else {
-    var element = Module.getElement(source);
-    if (!element) {
-      console.error("Can't find element for selector:", source);
-      return;
-    }
-    var canvas;
-    var context;
-    if (element instanceof HTMLCanvasElement) {
-      // Canvas
-      canvas = element;
-      context = canvas.getContext('2d');
-    } else if (element instanceof Image ||
-               element instanceof HTMLImageElement ||
-               element instanceof HTMLVideoElement) {
-      if (element instanceof HTMLImageElement) {
-        console.assert(element.complete);
-      }
-      // Image or Video
-      var width = element.videoWidth || element.naturalWidth || element.width;
-      var height = element.videoHeight || element.naturalHeight || element.height;
-      canvas = document.createElement('canvas'); // draw image or video to a temp canvas
-      canvas.width = width;
-      canvas.height = height;
-      context = canvas.getContext('2d');
-      context.drawImage(element, 0, 0, canvas.width, canvas.height);
-    }
-    imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    return source;
   }
-  return imageData;
+  var canvas = Module.toCanvas(source);
+  return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
 };
 
-// Writes image data directly into ImageData, HTMLCanvasElement, HTMLImageElement or creates a new canvas and appends it
-// TODO: take in callback?
+Module.writeImageDataToCanvas = function(canvas, data, width, height) {
+  canvas.width = width;
+  canvas.height = height;
+  var context = canvas.getContext('2d');
+  var imageData = context.createImageData(width, height);
+  imageData.data.set(data);
+  context.putImageData(imageData, 0, 0);
+  return canvas;
+};
+
+// Writes image data into ImageData, HTMLCanvasElement, HTMLImageElement or creates a new canvas and appends it
 Module.writeImageData = function(dest, data, width, height) {
   console.assert(dest);
+
+  if (typeof dest === 'function') {
+    dest(data, width, height);
+    return;
+  }
 
   if (Module.isImageData(dest)) {
     console.assert(dest.width === width, dest.height === height);
@@ -74,33 +61,16 @@ Module.writeImageData = function(dest, data, width, height) {
     return;
   }
 
-  var element = Module.getElement(dest);
-  if (!element) {
-    console.error("Can't convert argument to imageData:", dest);
-    return;
-  }
-  console.assert(!(element instanceof HTMLVideoElement), 'Cannot write to video element');
+  console.assert(dest instanceof HTMLElement);
+  console.assert(!(dest instanceof HTMLVideoElement), 'Cannot write to video element');
+  var canvas = (dest instanceof HTMLCanvasElement) ? dest : document.createElement('canvas');
+  Module.writeImageDataToCanvas(canvas, data, width, height);
 
-  var canvas;
-  if (element instanceof HTMLCanvasElement) {
-    canvas = element;
-  } else {
-    canvas = document.createElement('canvas');
-  }
-
-  // Draw the uint8Array data to the imageData in the canvas
-  canvas.width = width;
-  canvas.height = height;
-  var context = canvas.getContext('2d');
-  var imageData = context.createImageData(width, height);
-  imageData.data.set(data);
-  context.putImageData(imageData, 0, 0);
-
-  if (!(element instanceof HTMLCanvasElement)) {
-    if (element instanceof Image || element instanceof HTMLImageElement) {
-      element.src = canvas.toDataURL();
+  if (!(dest instanceof HTMLCanvasElement)) {
+    if (dest instanceof HTMLImageElement) {
+      dest.src = canvas.toDataURL();
     } else {
-      element.appendChild(canvas);
+      dest.appendChild(canvas);
     }
   }
 };
