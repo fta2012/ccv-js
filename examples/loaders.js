@@ -89,6 +89,7 @@ const loadWebcam = () => {
 };
 
 const loadVideo = (url) => {
+  url = url.replace(/^http:/, 'https:');
   return fetch(url)
     .then((response) => response.blob())
     .then((blob) => {
@@ -97,6 +98,7 @@ const loadVideo = (url) => {
 };
 
 const loadImage = (url) => {
+  url = url.replace(/^http:/, 'https:');
   return fetch(url)
     .then((response) => response.blob())
     .then((blob) => {
