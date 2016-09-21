@@ -75,12 +75,10 @@ const videoPromise = (objectURL) => {
 
 const loadWebcam = () => {
   return navigator.mediaDevices.getUserMedia({
-      // TODO: these constraints don't work in firefox
+      audio: false,
       video: {
-        mandatory: {
-          maxWidth: 160,
-          maxHeight: 120
-        }
+        width: { ideal: 160 },
+        height: { ideal: 120 }
       }
     })
     .then((stream) => {

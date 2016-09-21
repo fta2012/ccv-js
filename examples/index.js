@@ -3,54 +3,62 @@
 const swtDetect = (imgElement, container, message, params) => {
   // TODO: Should try hooking this up with tesseract.js to do OCR: https://tesseract.projectnaptha.com/
   const image = new CCV.ccv_dense_matrix_t();
-  CCV.ccv_read(imgElement, image, CCV.CCV_IO_GRAY);
+  CCV.ccv_read(imgElement, image);
   const rects = CCV.ccv_swt_detect_words(image, params);
+  const rects_js = rects.toJS();
 
-  console.log(rects.toJS());
+  console.log(rects_js);
 
-  message.text(`Detected ${rects.size()} text regions.`);
+  message.text(`Detected ${rects_js.length} text regions.`);
   container.empty();
-  CCV.ccv_write(image, container[0]);
-  container.append(rects.toJS().map((x) => renderRect(x)));
+  CCV.ccv_write(image, container[0]); // This appends a new canvas into container. Could also just write it to an existing canvas
+  container.append(rects_js.map((x) => renderRect(x)));
 
   rects.delete();
   image.delete();
 };
 
 const siftMatch = (imgElement1, imgElement2, container, message, params) => {
-  const image = new CCV.ccv_dense_matrix_t();
+  // TODO: Should add UI for taking a photo with webcam for one input and webcam for the other. Small enough images can still run in real time.
   console.time('siftread1');
+  const image = new CCV.ccv_dense_matrix_t();
   CCV.ccv_read(imgElement1, image, CCV.CCV_IO_GRAY);
   console.timeEnd('siftread1');
+
+  console.time('sift1');
   const image_keypoints = new CCV.ccv_keypoint_array();
   const image_desc = new CCV.ccv_dense_matrix_t();
-  console.time('sift1');
   CCV.ccv_sift(image, image_keypoints, image_desc, 0, params);
+  const image_keypoints_js = image_keypoints.toJS();
   console.timeEnd('sift1');
-  const object = new CCV.ccv_dense_matrix_t();
+
   console.time('siftread2');
+  const object = new CCV.ccv_dense_matrix_t();
   CCV.ccv_read(imgElement2, object, CCV.CCV_IO_GRAY);
   console.timeEnd('siftread2');
+
+  console.time('sift2');
   const obj_keypoints = new CCV.ccv_keypoint_array();
   const obj_desc = new CCV.ccv_dense_matrix_t();
-  console.time('sift2');
   CCV.ccv_sift(object, obj_keypoints, obj_desc, 0, params);
+  const obj_keypoints_js = obj_keypoints.toJS();
   console.timeEnd('sift2');
+
   console.time('siftmatch');
   const matches = CCV.ccv_sift_match(image_desc, image_keypoints, obj_desc, obj_keypoints);
   console.timeEnd('siftmatch');
 
   console.groupCollapsed();
-  console.log(image_keypoints.toJS());
-  console.log(obj_keypoints.toJS());
+  console.log(image_keypoints_js);
+  console.log(obj_keypoints_js);
   console.log(matches);
   console.groupEnd('output');
 
-  message.text(`Detected ${image_keypoints.size()} and ${obj_keypoints.size()} keypoints. ${matches.length} matched.`);
+  message.text(`Detected ${image_keypoints_js.length} and ${obj_keypoints_js.length} keypoints. ${matches.length} matched.`);
   container.empty();
   CCV.ccv_write(image, container[0]);
   CCV.ccv_write(object, container[0]);
-  container.append(renderSiftMatches(image.getCols(), image.getRows(), object.getCols(), object.getRows(), image_keypoints.toJS(), obj_keypoints.toJS(), matches));
+  container.append(renderSiftMatches(image.get_cols(), image.get_rows(), object.get_cols(), object.get_rows(), image_keypoints_js, obj_keypoints_js, matches));
 
   obj_desc.delete();
   obj_keypoints.delete();
@@ -66,13 +74,14 @@ const scdDetect = (imgElement, container, message, params) => {
   CCV.ccv_read(imgElement, image, CCV.CCV_IO_RGB_COLOR);
   scdCascade = scdCascade || CCV.ccv_scd_classifier_cascade_read(CCV.CCV_SCD_FACE_FILE);
   const rects = CCV.ccv_scd_detect_objects(image, scdCascade, 1, params);
+  const rects_js = rects.toJS();
 
-  console.log(rects.toJS());
+  console.log(rects_js);
 
   message.text(`Detected ${rects.size()} faces.`);
   container.empty();
   CCV.ccv_write(image, container[0]);
-  container.append(rects.toJS().map((x) => renderRect(x)));
+  container.append(rects_js.map((x) => renderRect(x)));
 
   rects.delete();
   image.delete();
@@ -81,16 +90,17 @@ const scdDetect = (imgElement, container, message, params) => {
 let icfCascade = null;
 const icfDetect = (imgElement, container, message, params) => {
   const image = new CCV.ccv_dense_matrix_t();
-  CCV.ccv_read(imgElement, image, CCV.CCV_IO_RGB_COLOR);
+  CCV.ccv_read(imgElement, image, CCV.CCV_IO_RGB_COLOR); // Doesn't seem to work on gray
   icfCascade = icfCascade || CCV.ccv_icf_read_classifier_cascade(CCV.CCV_ICF_PEDESTRIAN_FILE);
   const comps = CCV.ccv_icf_detect_objects(image, icfCascade, 1, params);
+  const comps_js = comps.toJS();
 
-  console.log(comps.toJS());
+  console.log(comps_js);
 
   message.text(`Detected ${comps.size()} pedestrians.`);
   container.empty();
   CCV.ccv_write(image, container[0]);
-  container.append(comps.toJS().map((x) => renderComp(x)));
+  container.append(comps_js.map((x) => renderComp(x)));
 
   comps.delete();
   image.delete();
@@ -100,16 +110,17 @@ const dpmModel = {};
 const dpmDetect = (imgElement, container, message, params) => {
   const image = new CCV.ccv_dense_matrix_t();
   CCV.ccv_read(imgElement, image, CCV.CCV_IO_GRAY);
-  const modelType = CCV.CCV_DPM_CAR_FILE; // or CCV.CCV_DPM_PEDESTRIAN_FILE
-  dpmModel[modelType] = dpmModel[modelType] || CCV.ccv_dpm_read_mixture_model(CCV.CCV_DPM_CAR_FILE);
+  const modelType = CCV.CCV_DPM_CAR_FILE; // Can change this to CCV.CCV_DPM_PEDESTRIAN_FILE to detect pedestrian. TODO: support cascades to do both
+  dpmModel[modelType] = dpmModel[modelType] || CCV.ccv_dpm_read_mixture_model(modelType);
   const rootComps = CCV.ccv_dpm_detect_objects(image, dpmModel[modelType], 1, params);
+  const rootComps_js = rootComps.toJS();
 
-  console.log(rootComps.toJS());
+  console.log(rootComps_js);
 
   message.text(`Detected ${rootComps.size()} cars.`);
   container.empty();
   CCV.ccv_write(image, container[0]);
-  container.append(rootComps.toJS().map((x) => renderRootComp(x)));
+  container.append(rootComps_js.map((x) => renderRootComp(x)));
 
   rootComps.delete();
   image.delete();
@@ -118,12 +129,16 @@ const dpmDetect = (imgElement, container, message, params) => {
 const mserMatch = (imgElement, container, message, params) => {
   const fullImage = new CCV.ccv_dense_matrix_t();
   CCV.ccv_read(imgElement, fullImage, CCV.CCV_IO_GRAY);
+
   const image = new CCV.ccv_dense_matrix_t();
   CCV.ccv_sample_down(fullImage, image, 0, 0, 0);
+
   const canny = new CCV.ccv_dense_matrix_t();
   CCV.ccv_canny(image, canny, 0, 3, 175, 320);
+
   const outline = new CCV.ccv_dense_matrix_t();
   CCV.ccv_close_outline(canny, outline, 0);
+
   const mser = new CCV.ccv_dense_matrix_t();
   const mser_keypoint = CCV.ccv_mser(image, outline, mser, 0, params);
 
@@ -131,11 +146,12 @@ const mserMatch = (imgElement, container, message, params) => {
 
   message.text(`Detected ${mser_keypoint.size()} blobs.`);
   container.empty().css('whiteSpace', 'normal');
-  //CCV.ccv_write(fullImage, container[0]);
-  CCV.ccv_write(image, container[0]);
-  //CCV.ccv_write(canny, container[0]);
-  //CCV.ccv_write(outline, container[0]);
-  container.append(renderMserCanvas(mser.getData(), mser.getCols(), mser.getRows()));
+  CCV.ccv_write(fullImage, container[0]);
+  // Can dump the image for intermediate steps to debug:
+  // CCV.ccv_write(image, container[0]);
+  // CCV.ccv_write(canny, container[0]);
+  // CCV.ccv_write(outline, container[0]);
+  container.append(renderMserCanvas(mser.get_data(), mser.get_cols(), mser.get_rows()));
 
   mser_keypoint.delete();
   mser.delete();
@@ -148,7 +164,7 @@ const mserMatch = (imgElement, container, message, params) => {
 const tldTrack = (() => {
   let prevFrame;
   let tracker;
-  let currParams;
+  let trackerParams;
   const canvas = document.createElement('canvas');
   const rects = $('<div>')
     .css({
@@ -179,7 +195,7 @@ const tldTrack = (() => {
       // Draw click box
       rects.append(renderRect(clickBox));
       // Initialize tracker
-      tracker = new CCV.ccv_tld_new(prevFrame, clickBox, currParams);
+      tracker = new CCV.ccv_tld_new(prevFrame, clickBox, trackerParams);
     });
   const patches = $('<div>').css({
     textAlign: 'left',
@@ -189,10 +205,11 @@ const tldTrack = (() => {
 
   return (video, container, message, params, shouldReset) => {
     if (!(video instanceof HTMLVideoElement)) {
-      throw 'Must use video';
+      throw Error('Must use video');
     }
 
     if (shouldReset) {
+      // Clear tracker state
       if (prevFrame) {
         prevFrame.delete();
         prevFrame = null;
@@ -201,6 +218,9 @@ const tldTrack = (() => {
         tracker.delete();
         tracker = null;
       }
+      trackerParams = params;
+
+      // Clear UI
       message.text('Click a point to track');
       rects.empty();
       patches.empty();
@@ -210,17 +230,17 @@ const tldTrack = (() => {
         .after(patches);
     }
 
-    currParams = params;
-
+    // Read the current frame of the video
     const image = new CCV.ccv_dense_matrix_t();
     CCV.ccv_read(video, image, CCV.CCV_IO_GRAY);
 
-    //CCV.ccv_write(image, canvas);
+    // Display the frame on our canvas. Alternatively you can do CCV.ccv_write(image, canvas);
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
 
     if (!prevFrame || !tracker) {
+      // Either first frame or not tracking anything yet, just move on
       if (prevFrame) {
         prevFrame.delete();
       }
@@ -229,19 +249,19 @@ const tldTrack = (() => {
     }
 
     const info = new CCV.ccv_tld_info_t();
-    info.init();
     const newBox = CCV.ccv_tld_track_object(tracker, prevFrame, image, info);
-    const topComps = tracker.getTop();
-    const infoJS = info.toJS();
-    info.delete();
+    const topComps = tracker.top();
 
-    console.log(newBox, topComps, infoJS);
-    message.empty().append(JSON.stringify(infoJS));
+    console.log(newBox, topComps, info);
 
+    message.text(JSON.stringify($.extend({}, info)));
     rects.empty().append(topComps.map((comp) =>
-      renderRect(comp.rect).css('opacity', comp.classification.confidence / 100)
+      renderRect(comp.rect).css({
+        opacity: comp.classification.confidence / 100,
+        pointerEvents: 'none'
+      })
     ));
-    if (infoJS.track_success) {
+    if (info.track_success) {
       rects.append(
         renderRect(newBox.rect).css({
           borderColor: 'red',
@@ -251,15 +271,11 @@ const tldTrack = (() => {
         }).text(`x:${newBox.rect.x} y:${newBox.rect.y}`)
       );
     }
-    if (infoJS.perform_learn) {
-      const rect = newBox.rect;
-      const patch = document.createElement('canvas');
-      patch.width = rect.width;
-      patch.height = rect.height;
-      patch.getContext('2d').drawImage(canvas, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
-      patches.append(patch);
+    if (info.perform_learn) {
+      patches.append(renderPatch(video, newBox.rect));
     }
 
+    info.delete();
     prevFrame.delete();
     prevFrame = image;
   };
@@ -273,7 +289,7 @@ const lucasKanadeTrack = (() => {
     if (shouldReset) {
       prevFrame = null;
       prevPoints = null;
-      prevTracks = null;
+      prevTracks = [];
     }
 
     const width = video.videoWidth;
@@ -285,10 +301,10 @@ const lucasKanadeTrack = (() => {
     CCV.ccv_write(frame, container[0]);
 
     if (!prevFrame || prevPoints && prevPoints.size() === 0) {
-      // Lost all existing tracking points, reinit with a grid of points
+      // Is either the first frame or lost all existing tracking points, reinit with a grid of points
       prevFrame = frame;
       prevPoints = new CCV.ccv_decimal_point_array();
-      prevPoints.init();
+      prevPoints.init(); // The emscripten object is an empty shared_ptr so need to explicitly allocate the array
       const num = 30;
       for (let i = 0; i < num; i++) {
         for (let j = 0; j < num; j++) {
@@ -309,25 +325,27 @@ const lucasKanadeTrack = (() => {
     const prevPointsJS = prevPoints.toJS();
     const pointsWithStatusJS = pointsWithStatus.toJS();
 
-    const track = pointsWithStatusJS.map(({point, status}, i) => status ? [prevPointsJS[i], point] : null).filter((x) => x);
+    const tracks = pointsWithStatusJS.map(({point, status}, i) => status ? [prevPointsJS[i], point] : null).filter((x) => x);
 
     const maxTracksToKeep = 20;
-    prevTracks.push(renderLines(width, height, track));
+    prevTracks.push(renderLines(width, height, tracks));
     if (prevTracks.length > maxTracksToKeep) { // Limit the number of prev tracks
-      prevTracks = prevTracks.slice(1, maxTracksToKeep);
+      prevTracks = prevTracks.slice(1);
     }
 
-    message.text(`Tracking ${track.length} points`);
-    container.append(prevTracks)
+    message.text(`Tracking ${tracks.length} points`);
+    container
+      .append(prevTracks)
       .append(pointsWithStatusJS.map((p) =>
         renderPoint({x: p.point.x, y: p.point.y}).css('borderColor', p.status ? 'green' : 'red')
       ));
 
     prevFrame.delete();
     prevFrame = frame;
+
     prevPoints.delete();
-    prevPoints = new CCV.ccv_decimal_point_array(); // convert ccv_decimal_point_with_status_t to ccv_decimal_point_t
-    prevPoints.init();
+    prevPoints = new CCV.ccv_decimal_point_array(); // Convert ccv_decimal_point_with_status_t to ccv_decimal_point_t
+    prevPoints.init(); // The emscripten object is an empty shared_ptr so need to explicitly allocate the array
     pointsWithStatusJS.forEach((p) => {
       if (p.status) {
         prevPoints.push(p.point);
@@ -347,20 +365,21 @@ const renderRect = ({ x, y, width, height }) => {
     border: '1px solid darkgreen',
     boxSizing: 'border-box',
     backgroundColor: 'rgba(0, 255, 0, 0.5)',
-    pointerEvents: 'none'
   });
 };
 
-const renderComp = (comp) => {
-  return renderRect(comp.rect);
+const renderComp = ({rect, neighbors, classification: { confidence, id }}) => {
+  return renderRect(rect).attr('title', `neighbors: ${neighbors}, confidence: ${confidence}, id: ${id}`);
 };
 
 const renderRootComp = (rootComp) => {
+  const root = renderComp(rootComp);
+  root.attr('title', `pnum: ${rootComp.pnum}, ${root.attr('title')}`);
   return $('<div class="root-comp">')
-    .append(renderRect(rootComp.rect))
+    .append(root)
     .append(
       rootComp.part.slice(0, rootComp.pnum).map((comp) =>
-        renderRect(comp.rect).css({
+        renderComp(comp).css({
           borderColor: 'blue',
           backgroundColor: 'transparent'
         })
@@ -383,6 +402,7 @@ const renderPoint = ({ x, y }, radius = 3) => {
 };
 
 const renderKeypoint = (keypoint, color) => {
+  // TODO: There are better ways to visualize sift keypoints
   const r = 6;
   return renderPoint({
     x: keypoint.x,
@@ -400,6 +420,14 @@ const renderKeypoint = (keypoint, color) => {
     border:'1px solid white',
     marginLeft: -1
   }));
+};
+
+const renderPatch = (canvasImageSource, { x, y, width, height }) => {
+  const patch = document.createElement('canvas');
+  patch.width = width;
+  patch.height = height;
+  patch.getContext('2d').drawImage(canvasImageSource, x, y, width, height, 0, 0, width, height);
+  return patch;
 };
 
 const renderLines = (width, height, lines) => {
@@ -484,7 +512,7 @@ const renderMserCanvas = (mserUint32, width, height) => {
       imageData.data[(i * width + j) * 4 + 3] = 255;
     }
   }
-  console.log(count);
+  //console.log(count);
   context.putImageData(imageData, 0, 0);
   return canvas;
 };
@@ -502,15 +530,6 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
       left: 0
     })
     .hide();
-
-  const tryUpdate = (...args) => {
-    try {
-      update(...args);
-    } catch(e) {
-      console.error(e);
-      message.empty().append($('<code>').text(e));
-    }
-  };
 
   const demo = () => {
     loadSource(guiObj.source)
@@ -530,7 +549,14 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
               return;
             }
             stats.begin();
-            tryUpdate(...elements, imageContainer, message, guiObj.params, shouldReset);
+            try {
+              update(...elements, imageContainer, message, guiObj.params, shouldReset);
+            } catch(e) {
+              console.error(e);
+              message.empty().append($('<code>').text(e));
+              gui.stop();
+              return;
+            }
             stats.end();
             requestAnimationFrame(() => loop());
           };
@@ -541,7 +567,12 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
           message.text('Processing...');
           setTimeout(() => {
             const start = performance.now();
-            tryUpdate(...elements, imageContainer, message, guiObj.params);
+            try {
+              update(...elements, imageContainer, message, guiObj.params);
+            } catch(e) {
+              console.error(e);
+              message.empty().append($('<code>').text(e));
+            }
             const end = performance.now();
             message.append($('<p>').text(`${end - start} ms`));
           }, 20);
@@ -557,7 +588,7 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
   const gui = new dat.GUI({ autoPlace: false });
   const guiObj = {
     params: $.extend(true, {}, defaultParams), // Need deep copy to not mess with the real defaults in defaultParams
-    source,
+    source,// TODO: Should also allow file chooser, taking a still photos using the webcam, and choice of webcam resolution
     demo
   };
   const guiElement = $(gui.domElement)
@@ -584,7 +615,7 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
   source.forEach((x, i) => sourceFolder.add(source, i));
   let demoButton = gui.add(guiObj, 'demo');
 
-  const message = $('<div class="message">').css({ minHeight: 200, });
+  const message = $('<div class="message">').css({ padding: 20 });
 
   const imageContainer = $('<div class="canvas-wrapper">')
     .css({
@@ -603,7 +634,8 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
           textAlign: 'center',
           position: 'relative',
           marginTop: 10,
-          marginBottom: 10,
+          paddingBottom: 10,
+          marginBottom: 50,
           minHeight: 500,
         })
         .append(message)
@@ -664,7 +696,7 @@ $(() => {
     renderDemo({
       id: 'dpm',
       title: 'DPM: Deformable Parts Model',
-      desc: 'Car/pedestrian detector. This one is really slow (~10 seconds)',
+      desc: 'Car/pedestrian detector. This one is really slow (~10 seconds).',
       source: ['https://imgur.com/fpWLfJR'],
       update: dpmDetect,
       defaultParams: CCV.ccv_dpm_default_params
@@ -691,5 +723,12 @@ $(() => {
 
   $('.demo-area').toArray().reverse().forEach((x, i) => $(x).css('zIndex', i)); // dat.gui dropdown was hidden by next demo area
 
-  $('<style>.canvas-wrapper img, .canvas-wrapper canvas { vertical-align: top; }</style>').appendTo('head'); // align top for the two sift images
+  $(`<style>
+      .rect:hover {
+        opacity: 0.9;
+      }
+      .canvas-wrapper img, .canvas-wrapper canvas {
+        vertical-align: top;
+      }
+  </style>`).appendTo('head'); // align top for the two sift images
 });
