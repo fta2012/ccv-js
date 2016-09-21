@@ -1,3 +1,7 @@
+ifneq ($(notdir $(CXX)), em++)
+$(error You need to install/source emscripten and run with "emmake make")
+endif
+
 CXXFLAGS = -std=c++1z \
 	--bind \
 	--memory-init-file 0 \
@@ -39,7 +43,6 @@ build/ccv_without_filesystem.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_
 	du -h build/ccv_without_filesystem.js
 
 external/ccv/lib/libccv.a:
-	if [ "$CXX" != "em++" ]; then exit 1; fi # You need to install/source emscripten and run with `emmake make`
 	git submodule update --init
 	cd external/ccv/lib && emconfigure ./configure && emmake make libccv.a
 
