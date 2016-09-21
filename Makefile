@@ -30,11 +30,13 @@ build/ccv.js: CPPFLAGS += -DWITH_FILESYSTEM
 build/ccv.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_pre.js
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ccv_bindings.cpp -o $@ $(LDLIBS)
 	echo "CCV = CCVLib();" >> build/ccv.js
+	du -h build/ccv.js
 
 build/ccv_without_filesystem.js: CPPFLAGS += -s NO_FILESYSTEM=1
 build/ccv_without_filesystem.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_pre.js
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ccv_bindings.cpp -o $@ $(LDLIBS)
 	echo "CCV = CCVLib();" >> build/ccv_without_filesystem.js
+	du -h build/ccv_without_filesystem.js
 
 external/ccv/lib/libccv.a:
 	if [ "$CXX" != "em++" ]; then exit 1; fi # You need to install/source emscripten and run with `emmake make`
