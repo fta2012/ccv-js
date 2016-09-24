@@ -42,6 +42,7 @@ build/ccv_without_filesystem.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_
 	echo "CCV = CCVLib();" >> build/ccv_without_filesystem.js
 	du -h build/ccv_without_filesystem.js
 
+# TODO add -msse2? https://kripken.github.io/emscripten-site/docs/porting/simd.html
 external/ccv/lib/libccv.a:
 	git submodule update --init
 	cd external/ccv/lib && emconfigure ./configure && emmake make libccv.a

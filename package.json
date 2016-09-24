@@ -1,0 +1,32 @@
+{
+  "name": "ccv-js",
+  "version": "1.0.0",
+  "description": "Javascript bindings for ccv (a c-based computer vision library)",
+  "main": "build/ccv.js",
+  "directories": {
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fta2012/ccv-js.git"
+  },
+  "keywords": [
+    "ccv",
+    "computer vision",
+    "image processing",
+    "tracking",
+    "detection",
+    "canvas",
+    "video",
+    "emscripten"
+  ],
+  "author": "Franklin <fta2012@gmail.com> (http://franklinta.com)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/fta2012/ccv-js/issues"
+  },
+  "homepage": "https://github.com/fta2012/ccv-js#readme"
+}

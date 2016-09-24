@@ -1,3 +1,5 @@
+// Helpers used in the C++ bindings
+
 Module = Module || {};
 
 Module.isImageData = function(element) {
