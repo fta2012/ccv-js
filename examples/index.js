@@ -2,8 +2,15 @@
 
 const swtDetect = (imgElement, container, message, params) => {
   // TODO: Should try hooking this up with tesseract.js to do OCR: https://tesseract.projectnaptha.com/
+
+  // Allocate an empty ccv_dense_matrix_t* on the emscripten heap
   const image = new CCV.ccv_dense_matrix_t();
+
+  // Read the html image element and create a new matrix into the given pointer.
+  // Input could also be video, canvas, or ImageData.
   CCV.ccv_read(imgElement, image);
+
+  // Detect words in the image and return them in a ccv_array_t* that you're responsible for freeing.
   const rects = CCV.ccv_swt_detect_words(image, params);
   const rects_js = rects.toJS();
 
@@ -11,9 +18,10 @@ const swtDetect = (imgElement, container, message, params) => {
 
   message.text(`Detected ${rects_js.length} text regions.`);
   container.empty();
-  CCV.ccv_write(image, container[0]); // This appends a new canvas into container. Could also just write it to an existing canvas
+  CCV.ccv_write(image, container[0]); // This appends a new canvas into container. Could also output to an existing canvas or an ImageData.
   container.append(rects_js.map((x) => renderRect(x)));
 
+  // Must explicitly free since there are no destructors in javascript
   rects.delete();
   image.delete();
 };
@@ -72,13 +80,13 @@ let scdCascade = null;
 const scdDetect = (imgElement, container, message, params) => {
   const image = new CCV.ccv_dense_matrix_t();
   CCV.ccv_read(imgElement, image, CCV.CCV_IO_RGB_COLOR);
-  scdCascade = scdCascade || CCV.ccv_scd_classifier_cascade_read(CCV.CCV_SCD_FACE_FILE);
+  scdCascade = scdCascade || [CCV.ccv_scd_classifier_cascade_read(CCV.CCV_SCD_FACE_FILE)];
   const rects = CCV.ccv_scd_detect_objects(image, scdCascade, 1, params);
   const rects_js = rects.toJS();
 
   console.log(rects_js);
 
-  message.text(`Detected ${rects.size()} faces.`);
+  message.text(`Detected ${rects.getLength()} faces.`);
   container.empty();
   CCV.ccv_write(image, container[0]);
   container.append(rects_js.map((x) => renderRect(x)));
@@ -91,13 +99,13 @@ let icfCascade = null;
 const icfDetect = (imgElement, container, message, params) => {
   const image = new CCV.ccv_dense_matrix_t();
   CCV.ccv_read(imgElement, image, CCV.CCV_IO_RGB_COLOR); // Doesn't seem to work on gray
-  icfCascade = icfCascade || CCV.ccv_icf_read_classifier_cascade(CCV.CCV_ICF_PEDESTRIAN_FILE);
+  icfCascade = icfCascade || [CCV.ccv_icf_read_classifier_cascade(CCV.CCV_ICF_PEDESTRIAN_FILE)];
   const comps = CCV.ccv_icf_detect_objects(image, icfCascade, 1, params);
   const comps_js = comps.toJS();
 
   console.log(comps_js);
 
-  message.text(`Detected ${comps.size()} pedestrians.`);
+  message.text(`Detected ${comps.getLength()} pedestrians.`);
   container.empty();
   CCV.ccv_write(image, container[0]);
   container.append(comps_js.map((x) => renderComp(x)));
@@ -106,18 +114,23 @@ const icfDetect = (imgElement, container, message, params) => {
   image.delete();
 };
 
-const dpmModel = {};
+let dpmModels = null;
 const dpmDetect = (imgElement, container, message, params) => {
   const image = new CCV.ccv_dense_matrix_t();
   CCV.ccv_read(imgElement, image, CCV.CCV_IO_GRAY);
-  const modelType = CCV.CCV_DPM_CAR_FILE; // Can change this to CCV.CCV_DPM_PEDESTRIAN_FILE to detect pedestrian. TODO: support cascades to do both
-  dpmModel[modelType] = dpmModel[modelType] || CCV.ccv_dpm_read_mixture_model(modelType);
-  const rootComps = CCV.ccv_dpm_detect_objects(image, dpmModel[modelType], 1, params);
+  dpmModels = dpmModels || [
+    CCV.ccv_dpm_read_mixture_model(CCV.CCV_DPM_PEDESTRIAN_FILE),
+    CCV.ccv_dpm_read_mixture_model(CCV.CCV_DPM_CAR_FILE)
+  ];
+  const rootComps = CCV.ccv_dpm_detect_objects(image, dpmModels, 1, params);
   const rootComps_js = rootComps.toJS();
 
   console.log(rootComps_js);
 
-  message.text(`Detected ${rootComps.size()} cars.`);
+  const numPedestrians = rootComps_js.filter((x) => x.classification.id === 1).length;
+  const numCars = rootComps_js.filter((x) => x.classification.id === 2).length;
+
+  message.text(`Detected ${numPedestrians} pedestrians and ${numCars} cars`);
   container.empty();
   CCV.ccv_write(image, container[0]);
   container.append(rootComps_js.map((x) => renderRootComp(x)));
@@ -144,7 +157,7 @@ const mserMatch = (imgElement, container, message, params) => {
 
   console.log(mser_keypoint.toJS());
 
-  message.text(`Detected ${mser_keypoint.size()} blobs.`);
+  message.text(`Detected ${mser_keypoint.getLength()} blobs.`);
   container.empty().css('whiteSpace', 'normal');
   CCV.ccv_write(fullImage, container[0]);
   // Can dump the image for intermediate steps to debug:
@@ -165,7 +178,9 @@ const tldTrack = (() => {
   let prevFrame;
   let tracker;
   let trackerParams;
+
   const canvas = document.createElement('canvas');
+
   const rects = $('<div>')
     .css({
       position: 'absolute',
@@ -197,6 +212,7 @@ const tldTrack = (() => {
       // Initialize tracker
       tracker = new CCV.ccv_tld_new(prevFrame, clickBox, trackerParams);
     });
+
   const patches = $('<div>').css({
     textAlign: 'left',
     maxHeight: 200,
@@ -281,14 +297,33 @@ const tldTrack = (() => {
   };
 })();
 
+const makeGrid = (width, height, num) => {
+  const points = [];
+  for (let i = 0; i < num; i++) {
+    for (let j = 0; j < num; j++) {
+      points.push({
+        x: width * (i + 1) / (num + 1),
+        y: height * (j + 1) / (num + 1)
+      });
+    }
+  }
+  return points;
+};
+
 const lucasKanadeTrack = (() => {
   let prevFrame;
   let prevPoints;
   let prevTracks = [];
   return (video, container, message, params, shouldReset) => {
     if (shouldReset) {
-      prevFrame = null;
-      prevPoints = null;
+      if (prevFrame) {
+        prevFrame.delete();
+        prevFrame = null;
+      }
+      if (prevPoints) {
+        prevPoints.delete();
+        prevPoints = null;
+      }
       prevTracks = [];
     }
 
@@ -300,20 +335,20 @@ const lucasKanadeTrack = (() => {
     container.empty();
     CCV.ccv_write(frame, container[0]);
 
-    if (!prevFrame || prevPoints && prevPoints.size() === 0) {
+    if (!prevFrame || prevPoints && prevPoints.getLength() === 0) {
       // Is either the first frame or lost all existing tracking points, reinit with a grid of points
-      prevFrame = frame;
-      prevPoints = new CCV.ccv_decimal_point_array();
-      prevPoints.init(); // The emscripten object is an empty shared_ptr so need to explicitly allocate the array
-      const num = 30;
-      for (let i = 0; i < num; i++) {
-        for (let j = 0; j < num; j++) {
-          prevPoints.push({
-            x: width * (i + 1) / (num + 1),
-            y: height * (j + 1) / (num + 1)
-          });
-        }
+      if (prevFrame) {
+        prevFrame.delete();
       }
+      prevFrame = frame;
+
+      if (prevPoints) {
+        prevPoints.delete();
+      }
+      prevPoints = CCV.ccv_decimal_point_array.fromJS(
+        makeGrid(width, height, 30)
+      );
+
       prevTracks = [];
       return;
     }
@@ -321,17 +356,11 @@ const lucasKanadeTrack = (() => {
     console.assert(prevFrame && prevPoints);
     const pointsWithStatus = new CCV.ccv_decimal_point_with_status_array();
     CCV.ccv_optical_flow_lucas_kanade(prevFrame, frame, prevPoints, pointsWithStatus, params);
-
     const prevPointsJS = prevPoints.toJS();
     const pointsWithStatusJS = pointsWithStatus.toJS();
 
     const tracks = pointsWithStatusJS.map(({point, status}, i) => status ? [prevPointsJS[i], point] : null).filter((x) => x);
-
-    const maxTracksToKeep = 20;
     prevTracks.push(renderLines(width, height, tracks));
-    if (prevTracks.length > maxTracksToKeep) { // Limit the number of prev tracks
-      prevTracks = prevTracks.slice(1);
-    }
 
     message.text(`Tracking ${tracks.length} points`);
     container
@@ -344,16 +373,29 @@ const lucasKanadeTrack = (() => {
     prevFrame = frame;
 
     prevPoints.delete();
-    prevPoints = new CCV.ccv_decimal_point_array(); // Convert ccv_decimal_point_with_status_t to ccv_decimal_point_t
-    prevPoints.init(); // The emscripten object is an empty shared_ptr so need to explicitly allocate the array
-    pointsWithStatusJS.forEach((p) => {
-      if (p.status) {
-        prevPoints.push(p.point);
-      }
-    });
+    prevPoints = CCV.ccv_decimal_point_array.fromJS( // Convert ccv_decimal_point_with_status_t to ccv_decimal_point_t
+      pointsWithStatusJS.filter((p) => p.status).map((p) => p.point)
+    );
+    pointsWithStatus.delete();
+
+    if (prevTracks.length > 20) { // Limit the number of prev tracks
+      prevTracks = prevTracks.slice(1);
+    }
   };
 })();
 
+const colors = [
+  0x1f77b4, 0xaec7e8,
+  0xff7f0e, 0xffbb78,
+  0x2ca02c, 0x98df8a,
+  0xd62728, 0xff9896,
+  0x9467bd, 0xc5b0d5,
+  0x8c564b, 0xc49c94,
+  0xe377c2, 0xf7b6d2,
+  0x7f7f7f, 0xc7c7c7,
+  0xbcbd22, 0xdbdb8d,
+  0x17becf, 0x9edae5
+];
 
 const renderRect = ({ x, y, width, height }) => {
   return $('<div class="rect">').css({
@@ -376,11 +418,16 @@ const renderRootComp = (rootComp) => {
   const root = renderComp(rootComp);
   root.attr('title', `pnum: ${rootComp.pnum}, ${root.attr('title')}`);
   return $('<div class="root-comp">')
-    .append(root)
+    .append(
+      root.css({
+        borderColor: `#${colors[rootComp.classification.id % colors.length].toString(16)}`,
+        borderWidth: 2
+      })
+    )
     .append(
       rootComp.part.slice(0, rootComp.pnum).map((comp) =>
         renderComp(comp).css({
-          borderColor: 'blue',
+          borderColor: 'green',
           backgroundColor: 'transparent'
         })
       )
@@ -483,18 +530,6 @@ const renderSiftMatches = (leftImageWidth, leftImageHeight, rightImageWidth, rig
 };
 
 const renderMserCanvas = (mserUint32, width, height) => {
-  const colors = [
-    0x1f77b4, 0xaec7e8,
-    0xff7f0e, 0xffbb78,
-    0x2ca02c, 0x98df8a,
-    0xd62728, 0xff9896,
-    0x9467bd, 0xc5b0d5,
-    0x8c564b, 0xc49c94,
-    0xe377c2, 0xf7b6d2,
-    0x7f7f7f, 0xc7c7c7,
-    0xbcbd22, 0xdbdb8d,
-    0x17becf, 0x9edae5
-  ];
   const canvas = $('<canvas>');
   canvas[0].width = width;
   canvas[0].height = height;
@@ -518,7 +553,7 @@ const renderMserCanvas = (mserUint32, width, height) => {
 };
 
 const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
-  const demoContainer = $('<div class="demo">').css('paddingTop', 50).attr('id', id);
+  const demoContainer = $('<div class="demo">').css('paddingTop', 50).attr('id', id); // padding-top and id neccessary for scrollspy
   $('#scrollspy ul').append(`<li><a href="#${demoContainer.attr('id')}">${title}</a></li>`);
 
   const stats = new Stats();
@@ -554,7 +589,7 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
             } catch(e) {
               console.error(e);
               message.empty().append($('<code>').text(e));
-              gui.stop();
+              guiObj.stop();
               return;
             }
             stats.end();
@@ -634,9 +669,8 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
           textAlign: 'center',
           position: 'relative',
           marginTop: 10,
-          paddingBottom: 10,
+          padding: '50px 0',
           marginBottom: 50,
-          minHeight: 500,
         })
         .append(message)
         .append(imageContainer)
@@ -696,10 +730,10 @@ $(() => {
     renderDemo({
       id: 'dpm',
       title: 'DPM: Deformable Parts Model',
-      desc: 'Car/pedestrian detector. This one is really slow (~10 seconds).',
-      source: ['https://imgur.com/fpWLfJR'],
+      desc: 'Car/pedestrian detector. This one might freeze your browser for a bit (~30 seconds).',
+      source: ['http://imgur.com/gallery/XyqyM'],
       update: dpmDetect,
-      defaultParams: CCV.ccv_dpm_default_params
+      defaultParams: $.extend({}, CCV.ccv_dpm_default_params, { flags: CCV.CCV_DPM_NO_NESTED }) // Without the no nested flag the result will look wrong for the demo image
     })
   ).append(
     renderDemo({
