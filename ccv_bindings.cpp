@@ -128,8 +128,34 @@ int ccv_read_html(const val& imageDataOrCanvasImageSource, ccv_dense_matrix_t** 
 
 
 // Wrap ccv_array_t with type information
-template<typename E>
-struct CCVArray : public ccv_array_t {};
+template<typename T>
+struct CCVArray : public ccv_array_t {
+  static std::shared_ptr<CCVArray<T>> fromJS(val jsArray) {
+    int length = jsArray["length"].as<int>();
+    auto array = make_shared_with_delete((CCVArray<T>*)ccv_array_new(sizeof(T), length, 0));
+    for (int i = 0; i < length; i++) {
+      T temp = jsArray[i].as<T>();
+      ccv_array_push(array.get(), &temp);
+    }
+    return array;
+  }
+
+  void push(const T& x) {
+    ccv_array_push(this, &x);
+  }
+
+  const T& get(int i) const {
+    return *(T*)ccv_array_get(this, i);
+  }
+
+  val toJS() const {
+    val jsArray = val::array();
+    for (int i = 0; i < this->rnum; i++) {
+      jsArray.call<void>("push", val(*(T*)ccv_array_get(this, i)));
+    }
+    return jsArray;
+  }
+};
 
 
 // Deleters
@@ -205,6 +231,7 @@ auto ccv_dense_matrix_t_get_step(const std::shared_ptr<ccv_dense_matrix_t>& ptr)
 auto ccv_dense_matrix_t_get_type(const std::shared_ptr<ccv_dense_matrix_t>& ptr) {
   return ptr->type;
 }
+
 val ccv_dense_matrix_t_get_data(const std::shared_ptr<ccv_dense_matrix_t>& pointer) {
   // Returns a js typed array view of the emscripten heap where the data array lives
   int numElement = pointer->step * pointer->rows / CCV_GET_DATA_TYPE_SIZE(pointer->type);
@@ -224,32 +251,21 @@ val ccv_dense_matrix_t_get_data(const std::shared_ptr<ccv_dense_matrix_t>& point
   }
 }
 
-
-
 template<typename T>
-void ccv_array_t_new(std::shared_ptr<CCVArray<T>>& array) {
-  array = make_shared_with_delete((CCVArray<T>*)ccv_array_new(sizeof(T), 0, 0));
+void CCVArray_push(const std::shared_ptr<CCVArray<T>>& ptr, const T& x) {
+  ptr->push(x);
 }
 template<typename T>
-void ccv_array_t_push(const std::shared_ptr<CCVArray<T>>& array, const T& x) {
-  ccv_array_push(array.get(), &x);
+const T& CCVArray_get(const std::shared_ptr<CCVArray<T>>& ptr, int i) {
+  return ptr->get(i);
 }
 template<typename T>
-const T& ccv_array_t_get(const std::shared_ptr<CCVArray<T>>& a, int i) {
-  return *(T*)ccv_array_get(a.get(), i);
-}
-template<typename T>
-auto ccv_array_t_get_rnum(const std::shared_ptr<CCVArray<T>>& ptr) {
+int CCVArray_get_rnum(const std::shared_ptr<CCVArray<T>>& ptr) {
   return ptr->rnum;
 }
 template<typename T>
-val ccv_array_t_to_js(const std::shared_ptr<CCVArray<T>>& ptr) {
-  assert(ptr);
-  val jsArray = val::array();
-  for (int i = 0; i < ptr->rnum; i++) {
-    jsArray.call<void>("push", val(*(T*)ccv_array_get(ptr, i)));
-  }
-  return jsArray;
+val CCVArray_toJS(const std::shared_ptr<CCVArray<T>>& ptr) {
+  return ptr->toJS();
 }
 
 
@@ -261,11 +277,6 @@ val ccv_tld_t_get_top(const std::shared_ptr<ccv_tld_t>& ptr) {
   }
   return jsarray;
 }
-
-
-
-
-
 
 
 // int ccv_read(const char *in, ccv_dense_matrix_t **x, int type)
@@ -354,16 +365,26 @@ val ccvjs_sift_match(const std::shared_ptr<ccv_dense_matrix_t>& desc1, const std
 
 #ifdef WITH_FILESYSTEM
 
+template<typename T>
+std::vector<T*> vectorFromJS(val jsArray) {
+  assert(val::global("Array").call<bool>("isArray", jsArray));
+  int length = jsArray["length"].as<int>();
+  std::vector<T*> vec;
+  for (int i = 0; i < length; i++) {
+    vec.push_back(jsArray[i].as<std::shared_ptr<T>>().get());
+  }
+  return vec;
+}
+
 // ccv_scd_classifier_cascade_t* ccv_scd_classifier_cascade_read(const char* filename);
 std::shared_ptr<ccv_scd_classifier_cascade_t> ccvjs_scd_classifier_cascade_read(const std::string& filename) {
   return make_shared_with_delete(ccv_scd_classifier_cascade_read(filename.c_str()));
 }
 
 // ccv_array_t* ccv_scd_detect_objects(ccv_dense_matrix_t* a, ccv_scd_classifier_cascade_t** cascades, int count, ccv_scd_param_t params);
-std::shared_ptr<CCVArray<ccv_rect_t>> ccvjs_scd_detect_objects(const std::shared_ptr<ccv_dense_matrix_t>& a, const std::shared_ptr<ccv_scd_classifier_cascade_t>& cascades, int count, ccv_scd_param_t params = ccv_scd_default_params) {
-  assert(count == 1);
-  ccv_scd_classifier_cascade_t* cascades_array[1] = { cascades.get() };
-  return make_shared_with_delete((CCVArray<ccv_rect_t>*)ccv_scd_detect_objects(a.get(), cascades_array, count, params));
+std::shared_ptr<CCVArray<ccv_rect_t>> ccvjs_scd_detect_objects(const std::shared_ptr<ccv_dense_matrix_t>& a, val cascadeJSArray, int count, ccv_scd_param_t params = ccv_scd_default_params) {
+  auto vec = vectorFromJS<ccv_scd_classifier_cascade_t>(cascadeJSArray);
+  return make_shared_with_delete((CCVArray<ccv_rect_t>*)ccv_scd_detect_objects(a.get(), vec.data(), vec.size(), params));
 }
 
 // ccv_icf_classifier_cascade_t* ccv_icf_read_classifier_cascade(const char* filename);
@@ -372,10 +393,9 @@ std::shared_ptr<ccv_icf_classifier_cascade_t> ccvjs_icf_read_classifier_cascade(
 }
 
 // ccv_array_t* ccv_icf_detect_objects(ccv_dense_matrix_t* a, void* cascade, int count, ccv_icf_param_t params);
-std::shared_ptr<CCVArray<ccv_comp_t>> ccvjs_icf_detect_objects(const std::shared_ptr<ccv_dense_matrix_t>& a, const std::shared_ptr<ccv_icf_classifier_cascade_t>& cascade, int count, ccv_icf_param_t params = ccv_icf_default_params) {
-  assert(count == 1);
-  ccv_icf_classifier_cascade_t* cascade_array[1] = { cascade.get() };
-  return make_shared_with_delete((CCVArray<ccv_comp_t>*)ccv_icf_detect_objects(a.get(), cascade_array, count, params));
+std::shared_ptr<CCVArray<ccv_comp_t>> ccvjs_icf_detect_objects(const std::shared_ptr<ccv_dense_matrix_t>& a, val cascadeJSArray, int count, ccv_icf_param_t params = ccv_icf_default_params) {
+  auto vec = vectorFromJS<ccv_icf_classifier_cascade_t>(cascadeJSArray);
+  return make_shared_with_delete((CCVArray<ccv_comp_t>*)ccv_icf_detect_objects(a.get(), vec.data(), vec.size(), params));
 }
 
 // ccv_dpm_mixture_model_t* ccv_dpm_read_mixture_model(const char* directory);
@@ -384,10 +404,9 @@ std::shared_ptr<ccv_dpm_mixture_model_t> ccvjs_dpm_read_mixture_model(std::strin
 }
 
 // ccv_array_t* ccv_dpm_detect_objects(ccv_dense_matrix_t* a, ccv_dpm_mixture_model_t** model, int count, ccv_dpm_param_t params);
-std::shared_ptr<CCVArray<ccv_root_comp_t>> ccvjs_dpm_detect_objects(const std::shared_ptr<ccv_dense_matrix_t>& a, const std::shared_ptr<ccv_dpm_mixture_model_t>& model, int count, ccv_dpm_param_t params = ccv_dpm_default_params) {
-  assert(count == 1);
-  ccv_dpm_mixture_model_t* model_array[1] = { model.get() };
-  return make_shared_with_delete((CCVArray<ccv_root_comp_t>*)ccv_dpm_detect_objects(a.get(), model_array, count, params));
+std::shared_ptr<CCVArray<ccv_root_comp_t>> ccvjs_dpm_detect_objects(const std::shared_ptr<ccv_dense_matrix_t>& a, val modelJSArray, int count, ccv_dpm_param_t params = ccv_dpm_default_params) {
+  auto vec = vectorFromJS<ccv_dpm_mixture_model_t>(modelJSArray);
+  return make_shared_with_delete((CCVArray<ccv_root_comp_t>*)ccv_dpm_detect_objects(a.get(), vec.data(), vec.size(), params));
 }
 
 #endif // WITH_FILESYSTEM
@@ -457,11 +476,15 @@ template<typename T>
 void register_ccv_array(const char* name) {
   class_<CCVArray<T>, base<ccv_array_t>>(name)
     .smart_ptr_constructor("shared_ptr<ccv_array_t>", &std::make_shared<CCVArray<T>>)
-    .function("init", &ccv_array_t_new<T>)
-    .function("size", &ccv_array_t_get_rnum<T>)
-    .function("get", &ccv_array_t_get<T>)
-    .function("push", &ccv_array_t_push<T>)
-    .function("toJS", &ccv_array_t_to_js<T>);
+    .class_function("fromJS", &CCVArray<T>::fromJS)
+    // TODO: Should bind directly to the member functions of CCVArray<T> but doing so seems to hit a bug
+    // where it will keep using the stale pointer in the shared_ptr even after being changed.
+    // Wrapping the functions seems to avoid the problem.
+    // https://github.com/kripken/emscripten/issues/4583
+    .function("getLength", &CCVArray_get_rnum<T>)
+    .function("get", &CCVArray_get<T>)
+    .function("push", &CCVArray_push<T>)
+    .function("toJS", &CCVArray_toJS<T>);
 }
 
 template<typename T, std::size_t... I>
@@ -478,11 +501,10 @@ EMSCRIPTEN_BINDINGS(ccv_js_module) {
   // TODO: Constructing each wrapped class as an empty shared_ptr doesn't seem to work.
   // So just use a spurious make_shared for constructor that will be reset by our custom make_shared_with_deleter later.
   // The object returned will be in an undefined state before then!
-
   class_<ccv_dense_matrix_t>("ccv_dense_matrix_t")
     .smart_ptr_constructor("shared_ptr<ccv_dense_matrix_t>", &std::make_shared<ccv_dense_matrix_t>)
     .function("get_data", &ccv_dense_matrix_t_get_data)
-    // TODO figure out why .property() binding doesn't work to get rid of these getters
+    // TODO: Should use .property() instead of wrapping with getters. https://github.com/kripken/emscripten/issues/4583
     .function("get_rows", &ccv_dense_matrix_t_get_rows)
     .function("get_cols", &ccv_dense_matrix_t_get_cols)
     .function("get_step", &ccv_dense_matrix_t_get_step)
@@ -580,6 +602,7 @@ EMSCRIPTEN_BINDINGS(ccv_js_module) {
   constant("CCV_FLIP_Y", (int)CCV_FLIP_Y);
   constant("CCV_DARK_TO_BRIGHT", (int)CCV_DARK_TO_BRIGHT);
   constant("CCV_BRIGHT_TO_DARK", (int)CCV_BRIGHT_TO_DARK);
+  constant("CCV_DPM_NO_NESTED", (int)CCV_DPM_NO_NESTED);
 
 
 
