@@ -498,6 +498,8 @@ void register_array(const char* name) {
 }
 
 EMSCRIPTEN_BINDINGS(ccv_js_module) {
+  // TODO: These bindings were added by hand so there are a lot stuff missing. Should add a header parser to try to autogenerate them.
+
   // TODO: Constructing each wrapped class as an empty shared_ptr doesn't seem to work.
   // So just use a spurious make_shared for constructor that will be reset by our custom make_shared_with_deleter later.
   // The object returned will be in an undefined state before then!
@@ -575,6 +577,7 @@ EMSCRIPTEN_BINDINGS(ccv_js_module) {
   // Location of the trained models in the emscripten filesystem.
   // For example the build flag "--embed-file external/ccv/samples/face.sqlite3@/" will put face.sqlite3 in "/" of the emscripten filesystem.
   // TODO: Shouldn't use embed-file. Should load the file into emscripten filesystem over network instead.
+  // TODO: The sqlite file for convnet is huge so it is probably infeasible to add.
   std::string CCV_SCD_FACE_FILE = "/face.sqlite3";
   std::string CCV_ICF_PEDESTRIAN_FILE = "/pedestrian.icf";
   std::string CCV_DPM_PEDESTRIAN_FILE = "/pedestrian.m";

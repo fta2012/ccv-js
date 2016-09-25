@@ -221,7 +221,7 @@ const tldTrack = (() => {
 
   return (video, container, message, params, shouldReset) => {
     if (!(video instanceof HTMLVideoElement)) {
-      throw Error('Must use video');
+      throw Error('Must use webcam or imgur animated gif');
     }
 
     if (shouldReset) {
@@ -315,6 +315,10 @@ const lucasKanadeTrack = (() => {
   let prevPoints;
   let prevTracks = [];
   return (video, container, message, params, shouldReset) => {
+    if (!(video instanceof HTMLVideoElement)) {
+      throw Error('Must use webcam or imgur animated gif');
+    }
+
     if (shouldReset) {
       if (prevFrame) {
         prevFrame.delete();
@@ -566,7 +570,7 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
     })
     .hide();
 
-  const demo = () => {
+  const demo = () => { // TODO: Need to debounce clicks so you don't start multiple instances
     loadSource(guiObj.source)
       .then((elements) => {
         if (elements.some((x) => x instanceof HTMLVideoElement)) {
@@ -632,7 +636,6 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
       top: 0,
       right: 0
     });
-  guiElement.find('.save-row select').css('color', 'black');
   const buildGui = (folder, obj) => {
     Object.keys(obj).forEach((key) => {
       const val = obj[key];
@@ -764,5 +767,5 @@ $(() => {
       .canvas-wrapper img, .canvas-wrapper canvas {
         vertical-align: top;
       }
-  </style>`).appendTo('head'); // align top for the two sift images
+  </style>`).appendTo('head'); // align top is for the two sift images
 });
