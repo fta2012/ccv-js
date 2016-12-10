@@ -1,7 +1,23 @@
 'use strict';
 
+const loadScript = (url, callback) => {
+
+    // Adding the script tag to the head as suggested before
+    var head = document.getElementsByTagName('head')[0];
+    var script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.src = url;
+
+    // Then bind the event to the callback function.
+    // There are several events for cross browser compatibility.
+    script.onreadystatechange = callback;
+    script.onload = callback;
+
+    // Fire the loading
+    head.appendChild(script);
+}
+
 const swtDetect = (imgElement, container, message, params) => {
-  // TODO: Should try hooking this up with tesseract.js to do OCR: https://tesseract.projectnaptha.com/
 
   // Allocate an empty ccv_dense_matrix_t* on the emscripten heap
   const image = new CCV.ccv_dense_matrix_t();
@@ -24,6 +40,63 @@ const swtDetect = (imgElement, container, message, params) => {
   // Must explicitly free since there are no destructors in javascript
   rects.delete();
   image.delete();
+};
+
+const swtDetectOcr = (imgElement, container, message, params) => {
+
+  const init = () => {
+    console.log('Tesseract Script Loaded...');
+    // Allocate an empty ccv_dense_matrix_t* on the emscripten heap
+    const image = new CCV.ccv_dense_matrix_t();
+
+    // Read the html image element and create a new matrix into the given pointer.
+    // Input could also be video, canvas, or ImageData.
+    CCV.ccv_read(imgElement, image);
+
+    // Detect words in the image and return them in a ccv_array_t* that you're responsible for freeing.
+    const rects = CCV.ccv_swt_detect_words(image, params);
+    const rects_js = rects.toJS();
+
+    console.log(rects_js);
+
+    const textRegions = `Detected ${rects_js.length} text regions.`;
+    message.text(textRegions);
+    container.empty();
+    CCV.ccv_write(image, container[0]); // This appends a new canvas into container. Could also output to an existing canvas or an ImageData.
+    container.append(rects_js.map((x) => renderRect(x)));
+
+    // -->> Tesseract detection
+    message.html(`${textRegions}<p class='tesseract'></p><p class='detected'></p>`);
+    message.find('.tesseract').text(`Processing ${rects_js.length} text regions with Tesseract OCR...`);
+
+    const ctx = container[0].querySelector("canvas").getContext('2d');
+    const rLength = rects_js.length - 1;
+    rects_js.map(function(el,idx){
+
+      let imageData = ctx.getImageData(el.x, el.y, el.width, el.height);
+      Tesseract.recognize(imageData)
+      .then( result => { 
+        if (idx == rLength ){
+          message.find('.detected').append(`<strong>${result.text}.</strong>`);
+          message.find('.tesseract').text(`Processed ${rects_js.length} text regions with Tesseract OCR.`);
+        } else {
+          message.find('.detected').append(`<strong>${result.text}, </strong>`);
+        }
+
+      });
+
+    });
+    // <<-- Tesseract detection
+
+    // Must explicitly free since there are no destructors in javascript
+    rects.delete();
+    image.delete();
+
+  }
+
+  loadScript('https://cdn.rawgit.com/naptha/tesseract.js/1.0.10/dist/tesseract.js', init);
+  return;
+
 };
 
 const siftMatch = (imgElement1, imgElement2, container, message, params) => {
@@ -700,6 +773,15 @@ $(() => {
       desc: 'Text detector.',
       source: ['https://imgur.com/DpnH0Lf'],
       update:  swtDetect,
+      defaultParams: CCV.ccv_swt_default_params
+    })
+  ).append(
+    renderDemo({
+      id: 'swt-ocr',
+      title: 'SWT: SWT with OCR',
+      desc: 'Text detector with Tesseract OCR .',
+      source: ['http://i.imgur.com/Q5tLzXR.jpg'],
+      update:  swtDetectOcr,
       defaultParams: CCV.ccv_swt_default_params
     })
   ).append(
