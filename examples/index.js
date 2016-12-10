@@ -1,8 +1,6 @@
 'use strict';
 
 const swtDetect = (imgElement, container, message, params) => {
-  // TODO: Should try hooking this up with tesseract.js to do OCR: https://tesseract.projectnaptha.com/
-
   // Allocate an empty ccv_dense_matrix_t* on the emscripten heap
   const image = new CCV.ccv_dense_matrix_t();
 
@@ -16,10 +14,30 @@ const swtDetect = (imgElement, container, message, params) => {
 
   console.log(rects_js);
 
-  message.text(`Detected ${rects_js.length} text regions.`);
+  const patches = rects_js.map((rect) => renderPatch(imgElement, rect))
+  const ocr = $('<div>');
+  message
+    .text(`Detected ${rects_js.length} text regions.`)
+    .append($('<div>').css({minHeight: 50}).append(patches))
+    .append(ocr);
   container.empty();
   CCV.ccv_write(image, container[0]); // This appends a new canvas into container. Could also output to an existing canvas or an ImageData.
   container.append(rects_js.map((x) => renderRect(x)));
+
+  if (!(imgElement instanceof HTMLVideoElement)) {
+    $.getScript('https://cdn.rawgit.com/naptha/tesseract.js/1.0.10/dist/tesseract.js', () => {
+      patches.map((patch) => {
+        const imageData = patch.getContext('2d').getImageData(0, 0, patch.width, patch.height);
+        Tesseract
+          .recognize(imageData)
+          .then((result) => {
+            console.log(result);
+            ocr.append(result.html);
+          });
+      });
+    });
+  }
+
 
   // Must explicitly free since there are no destructors in javascript
   rects.delete();
@@ -698,7 +716,7 @@ $(() => {
       id: 'swt',
       title: 'SWT: Stroke Width Transform',
       desc: 'Text detector.',
-      source: ['https://imgur.com/DpnH0Lf'],
+      source: ['https://i.imgur.com/Q5tLzXR.jpg'],
       update:  swtDetect,
       defaultParams: CCV.ccv_swt_default_params
     })

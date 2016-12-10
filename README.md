@@ -51,12 +51,8 @@ You should be able to just drop in the js file found at `build/ccv.js`(~9MB, 2MB
 
 If you want rebuild to include your own trained files or add new bindings:
 
-- Install [emscripten](http://kripken.github.io/emscripten-site/docs/getting_started/index.html)
-- Run make:
-    ```
-    source <location you installed emscripten>/emsdk_portable/emsdk_env.sh
-    emmake make
-    ```
+1. Install [emscripten](http://kripken.github.io/emscripten-site/docs/getting_started/index.html)
+2. Run make: `emmake make`
 
 The emscripten tutorial you should read is [this](https://kripken.github.io/emscripten-site/docs/porting/connecting_cpp_and_javascript/embind.html).
 The C++ bindings are all in `ccv_bindings.cpp`. JS helpers used in the bindings is in `ccv_pre.js`.
