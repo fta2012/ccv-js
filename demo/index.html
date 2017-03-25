@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WASM VISION</title>
+  <script src="https://code.jquery.com/jquery-3.2.1.min.js" 
+  integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4="
+  crossorigin="anonymous">
+  </script>
+</head>
+<body>
+  <div id="img-container">
+    <img id="test" src="Street-Signs.jpg" alt="Image Here">
+  </div>
+  <div id="ocr"></div>
+  <script src="webccv.js"></script>
+  <script>
+    const renderPatch = (canvasImageSource, { x, y, width, height }) => {
+      const patch = document.createElement('canvas');
+      patch.width = width;
+      patch.height = height;
+      patch.getContext('2d').drawImage(canvasImageSource, x, y, width, height, 0, 0, width, height);
+      return patch;
+    };
+    const renderRect = ({ x, y, width, height }) => {
+      return $('<div class="rect">').css({
+        position: 'absolute',
+        left: x,
+        top: y,
+        width,
+        height,
+        border: '1px solid darkgreen',
+        boxSizing: 'border-box',
+        backgroundColor: 'rgba(0, 255, 0, 0.5)',
+      });
+    };
+    loadCCV().then((Module) => {
+      const imgElement = document.querySelector('#test');
+      const container = $('#img-container');
+      const ocr = document.querySelector('#ocr');
+      const image = new Module.ccv_dense_matrix_t();
+      Module.ccv_read(imgElement, image, Module.CCV_IO_GRAY);
+      const rects = Module.ccv_swt_detect_words(image, Module.ccv_swt_default_params);
+      const rects_js = rects.toJS();
+      const patches = rects_js.map((rect) => renderPatch(imgElement, rect));
+      // message
+      //   .text(`Detected ${rects_js.length} text regions.`)
+      //   .append($('<div>').css({minHeight: 50}).append(patches))
+      //   .append(ocr);
+      container.empty();
+      Module.ccv_write(image, container[0]); // This appends a new canvas into container. Could also output to an existing canvas or an ImageData.
+      container.append(rects_js.map((x) => renderRect(x)));
+      
+      rects.delete();
+      image.delete();
+    });
+  </script>
+</body>
+</html>
