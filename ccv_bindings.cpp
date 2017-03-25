@@ -242,10 +242,10 @@ val ccv_dense_matrix_t_get_data(const std::shared_ptr<ccv_dense_matrix_t>& point
       return val(typed_memory_view(numElement, pointer->data.i32));
     case CCV_32F:
       return val(typed_memory_view(numElement, pointer->data.f32));
-    case CCV_64S:
-      return val(typed_memory_view(numElement, pointer->data.i64));
-    case CCV_64F:
-      return val(typed_memory_view(numElement, pointer->data.f64));
+    // case CCV_64S:
+    //   return val(typed_memory_view(numElement, pointer->data.i64));
+    // case CCV_64F:
+    //   return val(typed_memory_view(numElement, pointer->data.f64));
     default:
       return val::null();
   }

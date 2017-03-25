@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>ccv.js</title>
+    <script type="text/javascript" src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/stats.js/r16/Stats.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.5.1/dat.gui.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+
+    <script type="text/javascript" src="build/ccv.js"></script>
+    <script type="text/javascript" src="examples/loaders.js"></script>
+    <script type="text/javascript" src="examples/index.js"></script>
+  </head>
+  <body data-spy="scroll" data-target="#scrollspy" data-offset="50" style="padding-top:50px">
+    <nav class="navbar navbar-inverse navbar-fixed-top">
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <a class="navbar-brand" href="https://github.com/fta2012/ccv-js/">ccv.js</a>
+        </div>
+        <ul class="nav navbar-nav navbar-right">
+          <li><a href="https://github.com/fta2012/ccv-js">github</a></li>
+          <li><a href="http://libccv.org/doc/">ccv docs</a></li>
+        </ul>
+      </div>
+    </nav>
+    <div class="container-fluid">
+      <div class="row">
+        <nav class="hidden-xs hidden-sm col-md-2" id="scrollspy">
+          <ul class="nav nav-pills nav-stacked" data-spy="affix">
+          </ul>
+        </nav>
+        <div class="col-md-10" id="content" style="background: white; overflow: auto">
+          <h1 class="page-header">Demos</h1>
+          <p>Click the demo button in each section to run.</p>
+          <p>Tips:</p>
+          <ul>
+            <li>Requires a webcam on desktop chrome or firefox with a decent CPU.</li>
+            <li>If you want to try your own images you can change source to an imgur link or "WEBCAM". Animated imgur gifs are loaded as mp4.</li>
+            <li>These demos aren't using webworkers so the slower ones will freeze your browser.</li>
+            <li>Most examples should run in under 5 secs (except for DPM).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
