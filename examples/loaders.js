@@ -1,6 +1,5 @@
 'use strict';
 
-const loadSourceCache = {};
 
 /**
  * Returns a promise that will resolve to either an img or video
@@ -10,6 +9,7 @@ const loadSourceCache = {};
  * Otherwise just fetch as img
  * If passed in an array of urls it will resolve when all loaded
  */
+const loadSourceCache = {};
 const loadSource = (source) => {
   if (Array.isArray(source)) {
     return Promise.all(source.map(loadSource));
@@ -61,11 +61,15 @@ const loadSource = (source) => {
   return promise;
 };
 
-const videoPromise = (objectURL) => {
+const videoPromise = (src) => {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.crossOrigin = 'Anonymous';
-    video.src = objectURL;
+    if (src instanceof MediaStream) {
+      video.srcObject = src;
+    } else {
+      video.src = src;
+    }
     video.autoplay = true;
     video.loop = true;
     video.oncanplay = () => resolve(video);
@@ -82,7 +86,7 @@ const loadWebcam = () => {
       }
     })
     .then((stream) => {
-      return videoPromise(URL.createObjectURL(stream));
+      return videoPromise(stream);
     });
 };
 
@@ -132,4 +136,15 @@ const loadImgur = (api, imgurId) => {
         return loadImage(link);
       }
     });
+};
+
+const loadScriptCache = {};
+const loadScript = (url) => {
+  if (!loadScriptCache[url]) {
+    loadScriptCache[url] = new Promise((resolve) => {
+      jQuery.ajaxSetup({cache: true});
+      jQuery.getScript(url, resolve);
+    }); // TODO handle errors
+  }
+  return loadScriptCache[url];
 };

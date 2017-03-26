@@ -47,7 +47,13 @@ See `examples/index.js` for source code of the demos (which are mostly ported fr
 
 ## Install/Build
 
-You should be able to just drop in the js file found at `build/ccv.js`(~9MB, 2MB gzipped). There is a smaller file at `build/ccv_without_filesystem.js`(~2.3MB, 400KB gzipped) but at the cost of removing emscripten filesystem support and the model files required for SCD, ICF, and DPM.
+You should be able to just drop in the js file found at `build/ccv.js`(~9MB, 2MB gzipped):
+
+```html
+<script src="//cdn.rawgit.com/fta2012/ccv-js/f63c56c8/build/ccv.js"></script>
+```
+
+There is a smaller file at `build/ccv_without_filesystem.js`(~2.3MB, 400KB gzipped) but at the cost of removing emscripten filesystem support and the model files required for SCD, ICF, and DPM.
 
 If you want rebuild to include your own trained files or add new bindings:
 

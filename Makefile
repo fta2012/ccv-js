@@ -42,6 +42,7 @@ build/ccv.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_pre.js
 	echo "self.CCV = CCVLib(self.CCV || {});" >> build/ccv.js # Always create a global CCV module when script loads
 	du -h build/ccv.js # show file size
 
+# TODO rather than a separate build target we should just load the data files on demand
 build/ccv_without_filesystem.js: CPPFLAGS += -s NO_FILESYSTEM=1
 build/ccv_without_filesystem.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_pre.js
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ccv_bindings.cpp -o $@ $(LDLIBS)
