@@ -12,9 +12,9 @@ const swtDetect = (imgElement, container, message, params) => {
   const rects = CCV.ccv_swt_detect_words(image, params);
   const rects_js = rects.toJS();
 
+  // Draw the detected rects and optionally OCR them using tesseract
   console.log(rects_js);
-
-  const patches = rects_js.map((rect) => renderPatch(imgElement, rect))
+  const patches = rects_js.map((rect) => renderPatch(imgElement, rect));
   const ocr = $('<div>');
   message
     .text(`Detected ${rects_js.length} text regions.`)
@@ -23,9 +23,9 @@ const swtDetect = (imgElement, container, message, params) => {
   container.empty();
   CCV.ccv_write(image, container[0]); // This appends a new canvas into container. Could also output to an existing canvas or an ImageData.
   container.append(rects_js.map((x) => renderRect(x)));
-
   if (!(imgElement instanceof HTMLVideoElement)) {
-    $.getScript('https://cdn.rawgit.com/naptha/tesseract.js/1.0.10/dist/tesseract.js', () => {
+    loadScript('https://cdn.rawgit.com/naptha/tesseract.js/1.0.10/dist/tesseract.js').then(() => {
+      // Send the patches of detected text to OCR engine
       patches.map((patch) => {
         const imageData = patch.getContext('2d').getImageData(0, 0, patch.width, patch.height);
         Tesseract
@@ -37,7 +37,6 @@ const swtDetect = (imgElement, container, message, params) => {
       });
     });
   }
-
 
   // Must explicitly free since there are no destructors in javascript
   rects.delete();
@@ -234,12 +233,27 @@ const tldTrack = (() => {
   const patches = $('<div>').css({
     textAlign: 'left',
     maxHeight: 200,
+    marginTop: 50,
     overflowY: 'auto'
   });
 
   return (video, container, message, params, shouldReset) => {
     if (!(video instanceof HTMLVideoElement)) {
       throw Error('Must use webcam or imgur animated gif');
+    }
+
+    // Need to scale down the video so it will run at a decent frame rate
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+    let scale = 1; // amount we need to scale up in css to compensate
+    while (width > 320 || height > 320) {
+      width /= 2;
+      height /= 2;
+      scale *= 2;
+    }
+    // If the original dimensions are pretty small, scale up to fill more of the screen
+    while (2 * scale * width <= 640) {
+      scale *= 2;
     }
 
     if (shouldReset) {
@@ -259,19 +273,23 @@ const tldTrack = (() => {
       rects.empty();
       patches.empty();
       container
+        .css({
+          transform: `scale(${scale})`,
+          margin: `${(scale * height - height) / 2}px ${(scale * width - width) / 2}px`
+        })
         .append(canvas)
         .append(rects)
         .after(patches);
     }
 
+    // Draw the video onto canvas (with possibly scaled down width and height)
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(video, 0, 0, width, height);
+
     // Read the current frame of the video
     const image = new CCV.ccv_dense_matrix_t();
-    CCV.ccv_read(video, image, CCV.CCV_IO_GRAY);
-
-    // Display the frame on our canvas. Alternatively you can do CCV.ccv_write(image, canvas);
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    CCV.ccv_read(canvas, image, CCV.CCV_IO_GRAY);
 
     if (!prevFrame || !tracker) {
       // Either first frame or not tracking anything yet, just move on
@@ -306,7 +324,7 @@ const tldTrack = (() => {
       );
     }
     if (info.perform_learn) {
-      patches.append(renderPatch(video, newBox.rect));
+      patches.append(renderPatch(canvas, newBox.rect));
     }
 
     info.delete();
@@ -575,8 +593,7 @@ const renderMserCanvas = (mserUint32, width, height) => {
 };
 
 const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
-  const demoContainer = $('<div class="demo">').css('paddingTop', 50).attr('id', id); // padding-top and id neccessary for scrollspy
-  $('#scrollspy ul').append(`<li><a href="#${demoContainer.attr('id')}">${title}</a></li>`);
+  const demoContainer = $('<div class="demo">').css('paddingTop', 50).attr('id', id);
 
   const stats = new Stats();
   stats.showPanel(0);
@@ -588,18 +605,24 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
     })
     .hide();
 
+  let actionButton;
+  let stopKey = 'Stop';
+  let runKey = 'Run';
   const demo = () => { // TODO: Need to debounce clicks so you don't start multiple instances
+    message.empty().append($('<p>').text('Initializing...'));
     loadSource(guiObj.source)
       .then((elements) => {
         if (elements.some((x) => x instanceof HTMLVideoElement)) {
           let stop = false;
-          guiObj.stop = () => {
+          guiObj[stopKey] = () => {
             stop = true;
-            gui.remove(demoButton);
-            demoButton = gui.add(guiObj, 'demo');
+            guiObj[stopKey] = null;
+            gui.remove(actionButton);
+            actionButton = gui.add(guiObj, runKey);
           };
-          gui.remove(demoButton);
-          demoButton = gui.add(guiObj, 'stop');
+          gui.remove(actionButton);
+          actionButton = gui.add(guiObj, stopKey);
+          gui.closed = false;
 
           const loop = (shouldReset) => {
             if (stop) {
@@ -611,7 +634,7 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
             } catch(e) {
               console.error(e);
               message.empty().append($('<code>').text(e));
-              guiObj.stop();
+              guiObj[stopKey]();
               return;
             }
             stats.end();
@@ -623,6 +646,7 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
           statsElement.hide();
           message.text('Processing...');
           setTimeout(() => {
+            gui.closed = false;
             const start = performance.now();
             try {
               update(...elements, imageContainer, message, guiObj.params);
@@ -643,10 +667,11 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
 
 
   const gui = new dat.GUI({ autoPlace: false });
+  gui.closed = true;
   const guiObj = {
     params: $.extend(true, {}, defaultParams), // Need deep copy to not mess with the real defaults in defaultParams
     source,// TODO: Should also allow file chooser, taking a still photos using the webcam, and choice of webcam resolution
-    demo
+    [runKey]: demo
   };
   const guiElement = $(gui.domElement)
     .css({
@@ -668,8 +693,12 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
   buildGui(paramsFolder, guiObj.params);
   const sourceFolder = gui.addFolder('source');
   sourceFolder.open();
-  source.forEach((x, i) => sourceFolder.add(source, i));
-  let demoButton = gui.add(guiObj, 'demo');
+  source.forEach((x, i) => sourceFolder.add(source, i).onChange(() => {
+    if (guiObj[stopKey]) {
+      guiObj[stopKey]();
+    }
+  }));
+  actionButton = gui.add(guiObj, runKey);
 
   const message = $('<div class="message">').css({ padding: 20 });
 
@@ -680,24 +709,34 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
       whiteSpace: 'nowrap'
     });
 
+  const demoArea = $('<div class="demo-area">')
+    .css({
+      backgroundColor: '#eee',
+      textAlign: 'center',
+      position: 'relative',
+      marginTop: 10,
+      paddingTop: 120,
+      paddingBottom: 50,
+      marginBottom: 50,
+    })
+    .append(message)
+    .append(imageContainer)
+    .append(statsElement)
+    .append(guiElement)
+    .hide();
+
+  const showDemoAreaButton = $('<button type="button" class="btn btn-default">Run</button>')
+    .on('click', () => {
+      showDemoAreaButton.hide();
+      demoArea.show();
+      demo();
+    });
+
   return demoContainer
     .append($('<h2>').text(title))
     .append($('<p>').text(desc))
-    .append(
-      $('<div class="demo-area">')
-        .css({
-          backgroundColor: '#eee',
-          textAlign: 'center',
-          position: 'relative',
-          marginTop: 10,
-          padding: '50px 0',
-          marginBottom: 50,
-        })
-        .append(message)
-        .append(imageContainer)
-        .append(statsElement)
-        .append(guiElement)
-    );
+    .append(showDemoAreaButton)
+    .append(demoArea);
 };
 
 
@@ -715,7 +754,7 @@ $(() => {
     renderDemo({
       id: 'swt',
       title: 'SWT: Stroke Width Transform',
-      desc: 'Text detector.',
+      desc: 'Text detector. Also try with source "WEBCAM" or an animated gif: http://imgur.com/gallery/uzlcfuZ',
       source: ['https://i.imgur.com/Q5tLzXR.jpg'],
       update:  swtDetect,
       defaultParams: CCV.ccv_swt_default_params
@@ -733,8 +772,8 @@ $(() => {
     renderDemo({
       id: 'scd',
       title: 'SCD: SURF-Cascade Detection',
-      desc: 'Face detector.',
-      source: ['WEBCAM'],
+      desc: 'Face detector. Also try with "WEBCAM".',
+      source: ['http://imgur.com/gallery/nXPruDN'],
       update: scdDetect,
       defaultParams: CCV.ccv_scd_default_params
     })
@@ -742,7 +781,7 @@ $(() => {
     renderDemo({
       id: 'icf',
       title: 'ICF: Integral Channel Features',
-      desc: 'Pedestrian detector.',
+      desc: 'Pedestrian detector. Also try with animated gif: http://imgur.com/gallery/in0Ke2K',
       source: ['https://imgur.com/uN5eNym'],
       update: icfDetect,
       defaultParams: CCV.ccv_icf_default_params

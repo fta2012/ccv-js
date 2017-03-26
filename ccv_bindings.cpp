@@ -243,7 +243,9 @@ val ccv_dense_matrix_t_get_data(const std::shared_ptr<ccv_dense_matrix_t>& point
     case CCV_32F:
       return val(typed_memory_view(numElement, pointer->data.f32));
     case CCV_64S:
-      return val(typed_memory_view(numElement, pointer->data.i64));
+      assert(false);
+      // Note: Since there are no 64 bit integers in javascript, this line won't work:
+      // return val(typed_memory_view(numElement, pointer->data.i64));
     case CCV_64F:
       return val(typed_memory_view(numElement, pointer->data.f64));
     default:

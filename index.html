@@ -12,39 +12,37 @@
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
     <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
 
+    <script>
+      // If you want to add a callback for when CCV is loaded, you can create a CCV object with a postRun callback.
+      // This works the same way as the Module object in emscripten: https://kripken.github.io/emscripten-site/docs/api_reference/module.html
+      // When ccv.js script loads it will look for this (optional) global CCV variable and merge it into the emscripten module.
+      CCV = {
+        postRun: [
+          function() {
+            console.log('postRun', CCV, CCV.calledRun);
+          }
+        ]
+      };
+    </script>
     <script type="text/javascript" src="build/ccv.js"></script>
     <script type="text/javascript" src="examples/loaders.js"></script>
     <script type="text/javascript" src="examples/index.js"></script>
   </head>
-  <body data-spy="scroll" data-target="#scrollspy" data-offset="50" style="padding-top:50px">
-    <nav class="navbar navbar-inverse navbar-fixed-top">
-      <div class="container-fluid">
-        <div class="navbar-header">
-          <a class="navbar-brand" href="https://github.com/fta2012/ccv-js/">ccv.js</a>
-        </div>
-        <ul class="nav navbar-nav navbar-right">
-          <li><a href="https://github.com/fta2012/ccv-js">github</a></li>
-          <li><a href="http://libccv.org/doc/">ccv docs</a></li>
-        </ul>
-      </div>
-    </nav>
-    <div class="container-fluid">
-      <div class="row">
-        <nav class="hidden-xs hidden-sm col-md-2" id="scrollspy">
-          <ul class="nav nav-pills nav-stacked" data-spy="affix">
-          </ul>
-        </nav>
-        <div class="col-md-10" id="content" style="background: white; overflow: auto">
-          <h1 class="page-header">Demos</h1>
-          <p>Click the demo button in each section to run.</p>
-          <p>Tips:</p>
-          <ul>
+  <body style="padding:50px 0">
+    <a href="https://github.com/fta2012/ccv-js"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://camo.githubusercontent.com/38ef81f8aca64bb9a64448d0d70f1308ef5341ab/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f6461726b626c75655f3132313632312e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png"></a>
+    <div class="container">
+      <div id="content">
+        <h1 class="page-header">CCV.js</h1>
+        <p>
+          This page contains a bunch of demos for <a href="http://libccv.org/">ccv</a> (a minimalistic computer vision library written in C) compiled to javascript using emscripten.
+        </p>
+        <ul>
             <li>Requires a webcam on desktop chrome or firefox with a decent CPU.</li>
-            <li>If you want to try your own images you can change source to an imgur link or "WEBCAM". Animated imgur gifs are loaded as mp4.</li>
-            <li>These demos aren't using webworkers so the slower ones will freeze your browser.</li>
+            <li>If you want to try your own images you can change source to an <a href="http://imgur.com">imgur</a> link.</li>
+            <li>Some of the demos work with video input. You can either use WEBCAM as source or an animated imgur gifs (but they need to be pretty small such as http://imgur.com/gallery/MWg8sz0).</li>
+            <li>Be sure to stop each demo before moving on to the next. These demos aren't using webworkers so the slower ones will freeze your browser.</li>
             <li>Most examples should run in under 5 secs (except for DPM).</li>
-          </ul>
-        </div>
+        </ul>
       </div>
     </div>
   </body>

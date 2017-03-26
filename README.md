@@ -47,7 +47,13 @@ See `examples/index.js` for source code of the demos (which are mostly ported fr
 
 ## Install/Build
 
-You should be able to just drop in the js file found at `build/ccv.js`(~9MB, 2MB gzipped). There is a smaller file at `build/ccv_without_filesystem.js`(~2.3MB, 400KB gzipped) but at the cost of removing emscripten filesystem support and the model files required for SCD, ICF, and DPM.
+You should be able to just drop in the js file found at `build/ccv.js`(~9MB, 2MB gzipped):
+
+```html
+<script src="//cdn.rawgit.com/fta2012/ccv-js/f63c56c8/build/ccv.js"></script>
+```
+
+There is a smaller file at `build/ccv_without_filesystem.js`(~2.3MB, 400KB gzipped) but at the cost of removing emscripten filesystem support and the model files required for SCD, ICF, and DPM.
 
 If you want rebuild to include your own trained files or add new bindings:
 
@@ -60,20 +66,6 @@ The C++ bindings are all in `ccv_bindings.cpp`. JS helpers used in the bindings 
 ## TODOs / Limitations
 
 Grep for TODO in the code. If it wasn't demoed, it probably doesn't work (notably, convnet doesn't have bindings since it requires a huge sqlite file). Feel free to contribute!
-
-## Other interesting javascript computer vision libraries
-
-Also with emscripten:
-
-- [OpenCV.js](https://github.com/ucisysarch/opencvjs) (their readme forgot to link to their [demos](http://ucisysarch.github.io/opencvjs/examples/img_proc.html))
-- [tesseract.js](http://tesseract.projectnaptha.com/) (works well with ccv's SWT)
-
-Native JS:
-
-- [JSFeat](https://inspirit.github.io/jsfeat/)
-- [clmtrackr](https://github.com/auduno/clmtrackr)
-- [ConvNetJS](http://cs.stanford.edu/people/karpathy/convnetjs/)
-
 
 ## License
 
