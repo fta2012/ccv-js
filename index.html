@@ -12,6 +12,18 @@
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
     <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
 
+    <script>
+      // If you want to add a callback for when CCV is loaded, you can create a CCV object with a postRun callback.
+      // This works the same way as the Module object in emscripten: https://kripken.github.io/emscripten-site/docs/api_reference/module.html
+      // When ccv.js script loads it will look for this (optional) global CCV variable and merge it into the emscripten module.
+      CCV = {
+        postRun: [
+          function() {
+            console.log('postRun', CCV, CCV.calledRun);
+          }
+        ]
+      };
+    </script>
     <script type="text/javascript" src="build/ccv.js"></script>
     <script type="text/javascript" src="examples/loaders.js"></script>
     <script type="text/javascript" src="examples/index.js"></script>

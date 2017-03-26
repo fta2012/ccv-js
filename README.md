@@ -61,20 +61,6 @@ The C++ bindings are all in `ccv_bindings.cpp`. JS helpers used in the bindings 
 
 Grep for TODO in the code. If it wasn't demoed, it probably doesn't work (notably, convnet doesn't have bindings since it requires a huge sqlite file). Feel free to contribute!
 
-## Other interesting javascript computer vision libraries
-
-Also with emscripten:
-
-- [OpenCV.js](https://github.com/ucisysarch/opencvjs) (their readme forgot to link to their [demos](http://ucisysarch.github.io/opencvjs/examples/img_proc.html))
-- [tesseract.js](http://tesseract.projectnaptha.com/) (works well with ccv's SWT)
-
-Native JS:
-
-- [JSFeat](https://inspirit.github.io/jsfeat/)
-- [clmtrackr](https://github.com/auduno/clmtrackr)
-- [ConvNetJS](http://cs.stanford.edu/people/karpathy/convnetjs/)
-
-
 ## License
 
 MIT for the bindings and BSD 3-clause for ccv (which can be found in ./external/ccv/COPYING)
