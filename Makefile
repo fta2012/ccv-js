@@ -23,31 +23,40 @@ LDLIBS = -lccv
 all: release
 
 release: CXXFLAGS += -O3 --llvm-lto 1 -s AGGRESSIVE_VARIABLE_ELIMINATION=1 -s OUTLINING_LIMIT=10000 # TODO --closure 1
-release: build/ccv.js build/ccv_without_filesystem.js
+release: build/ccv.js build/ccv_without_filesystem.js build/ccv_wasm.js
 
 # TODO this target isn't tested and probably doesn't work
 # Also you probably need to do `emmake make clean` before building debug if you've already built release
 debug: CXXFLAGS += -v -g4 -s ASSERTIONS=1 -s DEMANGLE_SUPPORT=1 -s SAFE_HEAP=1 -s STACK_OVERFLOW_CHECK=1
 debug: CXXFLAGS += -Weverything -Wall -Wextra
-debug: build/ccv.js build/ccv_without_filesystem.js
+debug: build/ccv.js build/ccv_without_filesystem.js build/ccv_wasm.js
 
-build/ccv.js: CXXFLAGS += -s NO_FILESYSTEM=0 -s FORCE_FILESYSTEM=1
-build/ccv.js: CXXFLAGS += --embed-file external/ccv/samples/face.sqlite3@/
-build/ccv.js: CXXFLAGS += --embed-file external/ccv/samples/pedestrian.m@/
-build/ccv.js: CXXFLAGS += --embed-file external/ccv/samples/car.m@/
-build/ccv.js: CXXFLAGS += --embed-file external/ccv/samples/pedestrian.icf@/
+
+WITH_FILESYSTEM_CXXFLAGS = -s NO_FILESYSTEM=0 -s FORCE_FILESYSTEM=1 \
+	--embed-file external/ccv/samples/face.sqlite3@/ \
+	--embed-file external/ccv/samples/pedestrian.m@/ \
+	--embed-file external/ccv/samples/car.m@/ \
+	--embed-file external/ccv/samples/pedestrian.icf@/
+
+build/ccv.js: CXXFLAGS += $(WITH_FILESYSTEM_CXXFLAGS)
 build/ccv.js: CPPFLAGS += -DWITH_FILESYSTEM
 build/ccv.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_pre.js
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ccv_bindings.cpp -o $@ $(LDLIBS)
-	echo "self.CCV = CCVLib(self.CCV || {});" >> build/ccv.js # Always create a global CCV module when script loads
-	du -h build/ccv.js # show file size
+
+
+# Same as build/ccv.js but uses WASM. Outputs an additional build/ccv_wasm.wasm file.
+build/ccv_wasm.js: CXXFLAGS += -s WASM=1
+build/ccv_wasm.js: CXXFLAGS += $(WITH_FILESYSTEM_CXXFLAGS)
+build/ccv_wasm.js: CPPFLAGS += -DWITH_FILESYSTEM
+build/ccv_wasm.js: build/ccv.js
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ccv_bindings.cpp -o $@ $(LDLIBS)
+
 
 # TODO rather than a separate build target we should just load the data files on demand
 build/ccv_without_filesystem.js: CPPFLAGS += -s NO_FILESYSTEM=1
 build/ccv_without_filesystem.js: ccv_bindings.cpp external/ccv/lib/libccv.a ccv_pre.js
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ccv_bindings.cpp -o $@ $(LDLIBS)
-	echo "self.CCV = CCVLib(self.CCV || {});" >> build/ccv_without_filesystem.js # Always create a global CCV module when script loads
-	du -h build/ccv_without_filesystem.js # show file size
+
 
 external/ccv/lib/libccv.a:
 	git submodule update --init
