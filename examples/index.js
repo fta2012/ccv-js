@@ -740,8 +740,8 @@ const renderDemo = ({id, title, desc, source, update, defaultParams}) => {
 };
 
 
-$(() => {
-  $('#content').append(
+window.initPage = () => {
+  $('#content').html('').append(
     renderDemo({
       id: 'tld',
       title: 'TLD: Track Learn Detect',
@@ -825,4 +825,4 @@ $(() => {
         vertical-align: top;
       }
   </style>`).appendTo('head'); // align top is for the two sift images
-});
+};

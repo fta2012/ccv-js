@@ -22,6 +22,8 @@ ccv_matrix_free(image);
 The equivalent javascript is:
 
 ```javascript
+CCV = CCVLib({}); // initialize
+
 var image = new CCV.ccv_dense_matrix_t();
 CCV.ccv_read(document.querySelector('#some-img-element'), image, CCV.CCV_IO_GRAY);
 var rects = CCV.ccv_swt_detect_words(image, CCV.ccv_swt_default_params);
